@@ -1,3 +1,5 @@
 gevent
+glock
 Routes
 WebOb
+docopt
