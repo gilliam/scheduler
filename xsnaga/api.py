@@ -13,16 +13,9 @@
 # limitations under the License.
 
 from webob.dec import wsgify
-from webob.exc import HTTPNotFound
+from webob.exc import HTTPNotFound, HTTPBadRequest
 from routes import Mapper, url
 
-mapper = Mapper()
-
-def route(p):
-    def decl(f):
-        mapper.connect(p, action=f)
-        return f
-    return dec
 
 class _BaseResource(object):
     """Base resource that do not allow anything."""
@@ -34,96 +27,170 @@ class _BaseResource(object):
         if item is None:
             raise HTTPNotFound()
 
+    def _assert_request_content(self, request):
+        if not request.content_length:
+            raise HTTPBadRequest()
+        if request.json is None:
+            raise HTTPBadRequest()
+        return request.json
+
     index = _method_not_allowed
     create = _method_not_allowed
-    new = _method_not_allowed
     update = _method_not_allowed
     delete = _method_not_allowed
     show = _method_not_allowed
-    edit = _method_not_allowed
 
 
-def link(_url_name, **kw):
-    title = kw.pop('title', None)
-    link = {'href': url(url_name, **kw)}
-    if title is not None:
-        link['title'] = title
-    return link
-
-
-def links(**kw):
-    return kw
-
-
-class AppResource(_BaseResource):
-
-    def _build(self, app):
-        """Return a representation of the app."""
-        return {
-            'name': app.name, 'scale': app.scale,
+def _build_app(app):
+    """Return a representation of the app."""
+    return {
+        'kind': 'gilliam#app', 'name': app.name,
+        'repository': app.repository, 'text': app.text,
+        '_links': {
+            'self': url('app', app_name=app.name),
             }
+        }
 
-    def scale(self, request, name):
-        """Set new scale parameters for the app."""
-        app = self.app_store.by_name(name)
+
+def _build_deploy(app, deploy):
+    """Return a representation of the deploy."""
+    return {
+        'kind': 'gilliam#deploy', 'build': deploy.build,
+        'image': deploy.image, 'pstable': deploy.pstable,
+        'config': deploy.config, 'text': deploy.text,
+        'when': deploy.when.isoformat(' '), 'id': deploy.id,
+        '_links': {
+            'self': url('deploy', app_name=app.name,
+                        deploy_id=deploy.id),
+            }
+        }
+
+
+class _AppResource(_BaseResource):
+    """The app resource."""
+
+    def __init__(self, log, app_store):
+        self.log = log
+        self.app_store = app_store
+
+    def create(self, request):
+        data = self._assert_request_content(request)
+        app = self.app_store.create(data['name'], data['repository'],
+                                    data.get('text', data['name']))
+        response = Response(_build_app(app), status=201)
+        response.headers.add('Location', url('app', app_name=app.name))
+        return response
+
+    def update(self, request, app_name):
+        """Update an existing app."""
+        app = self.app_store.by_name(app_name)
         self._check_not_found(app)
-        # Simply set them without checking anything really.
-        app.scale = request.json
+        data = self._assert_request_content(request)
+        app.repository = data['repository']
+        app.text = data.get('text', app.name)
+        self.app_store.update(app)
+        return Response(_build_app(app), status=200)
+
+    def delete(self, request, app_name):
+        """Delete the app."""
+        app = self.app_store.by_name(app_name)
+        self._check_not_found(app)
+        self.app_store.remove(app)
+        return Response(status=204)
+
+    def scale(self, request, app_name):
+        """Return current scale for the app."""
+        app = self.app_store.by_name(app_name)
+        self._check_not_found(app)
+        return Response(app.scale, status=200)
+
+    def set_scale(self, request, app_name):
+        """Set new scale parameters for the app."""
+        app = self.app_store.by_name(app_name)
+        self._check_not_found(app)
+        data = self._assert_request_content(request)
+        self.app_store.set_scale(app, data)
+        return Response(status=200)
         
 
-class DeployResource(_BaseResource):
+class _DeployResource(_BaseResource):
     """The deploy collection that lives under an application."""
 
     def __init__(self, log, app_store, deploy_store):
-        pass
+        self.log = log
+        self.app_store = app_store
+        self.deploy_store = deploy_store
 
-    def _build(self, app, deploy):
-        """Construct a deploy JSON blob."""
-        return {
-            'build': deploy.build, 'image': deploy.image,
-            'pstable': deploy.pstable, 'config': deploy.config,
-            'text': deploy.text, 'when': deploy.when.isoformat(' '),
-            'id': deploy.id,
-            '_links': links(
-                self=url('deploy', name=app.name, id=deploy.id),
-                )
-            }
-
-    def index(self, request, name):
-        app = self.app_store.by_name(name)
+    def index(self, request, app_name):
+        app = self.app_store.by_name(app_name)
         self._check_not_found(app)
-
-        offset = request.params.get('offset', 0)
-        page_size = request.params.get('page_size', 10)
+        offset = int(request.params.get('offset', 0))
+        page_size = int(request.params.get('page_size', 10))
         deploys = list(app.deploys[offset:offset + page_size])
-        body = {
-            'deploys': [self._build(app, deploy) for deploy in deploys],
-            '_links': links(
-                next=url('deploys', name=app.name, 
-                         offset=offset + page_size,
-                         page_size=page_size))
-            }
-        return Response(status=200, body=body)
 
-    def create(self, request, name):
-        app = self.app_store.by_name(name)
+        links = {
+            'self': url('deploys', app_name=app_name,
+                        offset=offset, page_size=page_size),
+            'latest': url('deploy', app_name=app_name,
+                          deploy_id='latest')
+            }
+        if offset > 0:
+            links['prev'] = url('deploys', app_name=app.name,
+                                offset=offset - page_size,
+                                page_size=page_size)
+        if len(deploys) == page_size:
+            links['next'] = url('deploys', app_name=app.name,
+                                offset=offset + page_size,
+                                page_size=page_size)
+
+        items = [_build_deploy(app, deploy) for deploy in deploys],
+        return Response({'items': items, '_links': links}, status=200)
+
+    def create(self, request, app_name):
+        """Create a new deploy for the app."""
+        app = self.app_store.by_name(app_name)
         self._check_not_found(app)
-        data = request.json
-        deploy = self.deploy_store.create(app, data['build'], data['image']‚
+        data = self._assert_request_content(request)
+        app.deploy = self.deploy_store.create(app, data['build'], data['image']‚
             data['pstable'], data['config'], data['text'])
-        response = Response(status=201)
-        response.headers.add('Location', url('deploy', name=name, id=deploy.id))
+        self.app_store.update(app)
+        response = Response(_build_deploy(app, app.deploy), status=201)
+        response.headers.add('Location', url('deploy', app_name=app.name,
+                                             deploy_id=app.deploy.id))
         return response
 
-    def latest(self, request, name):
-        pass
+    def show(self, request, app_name, deploy_id):
+        """Return a specific deploy."""
+        app = self.app_store.by_name(app_name)
+        self._check_not_found(app)
+        deploy = self.by_id_for_app(int(deploy_id), app)
+        self._check_not_found(deploy)
+        return Response(_build_deploy(app, deploy), status=200)
+
+    def delete(self, request, app_name, deploy_id):
+        app = self.app_store.by_name(app_name)
+        self._check_not_found(app)
+        deploy = self.by_id_for_app(int(deploy_id), app)
+        self._check_not_found(deploy)
+        if deploy is app.deploy:
+            raise HTTPBadRequest()
+        self.deploy_store.remove(deploy)
+        return Response(status=204)
+
+    def latest(self, request, app_name):
+        """Latest deploy."""
+        app = self.app_store.by_name(app_name)
+        self._check_not_found(app)
+        return Response(_build_deploy(app, app.deploy), status=200)
 
 
 class API(object):
+    """Our REST API WSGI application."""
 
-    def __init__(self, log):
+    def __init__(self, log, clock, app_store, proc_store, deploy_store):
         self.controllers = {
-            'deploys': DeployResource(log, app_store, deploy_store),
+            'apps': _AppResource(log, app_store),
+            'deploys': _DeployResource(log, app_store, deploy_store),
             }
 
         self.mapper = Mapper()
@@ -159,120 +226,4 @@ class API(object):
         route = mapper.match(request.path_info, request.environ)
         controller = self.controllers[route.pop('controller')]
         action = getattr(controller, route.pop('action'))
-        return action(request, **action)
-
-
-def transaction(storm, f):
-    """Make a transaction wrapper around f."""
-    def wrapper(*args, **kw):
-        try:
-            try:
-                return f(*args, **kw)
-            except:
-                store.rollback()
-                raise
-        finally:
-            store.commit()
-    return wrapper
-
-
-class API(object):
-
-    def __init__(self, log, clock, app_store, proc_store,
-                 deploy_store):
-        """."""
-        self.log = log
-        self.clock = clock
-        self.app_store = app_store
-        self.proc_store = proc_store
-        self.deploy_store = deploy_store
-
-    def _make_app(self, app):
-        return {
-            'name': app.name,
-            'repository': app.name,
-            'text': app.text,
-            }
-
-    @route('/app/{name}', method=['GET'])
-    def get_app(self, request, name):
-        pass
-
-    def _make_deploy(self, deploy):
-        return {
-            'build': deploy.build, 'image': deploy.image,
-            'pstable': deploy.pstable, 'config': deploy.config,
-            'text': deploy.text, 'when': deploy.when.isoformat(' '),
-            'id': deploy.id
-            }
-
-    @route('/app/{name}/deploy', method='POST')
-    def create_deploy(self, request, name):
-        data = request.json()
-        app = self.app_store.by_name(name)
-        deploy = self.deploy_store.create(app, data['build'], data['image']‚
-            data['pstable'], data['config'], data['text'])
-        response = Response(status=201)
-        response.headers.add('Location', '/api/%s/deploy/%d' % (
-                app.name, deploy.id))
-        return response
-
-    @route('/app/{name}/deploy', method='GET')
-    def index_deploy(self, request, name, deploy_id):
-        app = self.app_store.by_name(name)
-        offset = request.params.get('offset', 0)
-        page_size = request.params.get('page_size', 10)
-        deploys = list(app.deploys[offset:offset + page_size])
-        body = {'deploys': []}
-        for deploy in deploys:
-            body['deploys'].append(self._make_deploy(deploy))
-        if len(deploys) == n:
-            body['next'] = '/app/%s/deploy?offset=%d&page_size=%d' % (
-                name, offset + page_size, page_size)
-        return Response(status=200, body=body)
-
-    @route('/app/{name}/deploy/latest', method='GET')
-    def latest_deploy(self, request, name):
-        app = self.app_store.by_name(name)
-        return Response(status=200, body=self._make_deploy(app.deploy))
-
-    @route('/app/{name}/deploy/{deploy_id}', method='GET')
-    def get_deploy(self, request, name, deploy_id):
-        app = self.app_store.by_name(name)
-        deploy = self.deploy_store.by_id_for_app(int(deploy_id), app)
-        return Response(status=200, body=self._make_deploy(deploy))
-
-    @route('/app/{name}/scale', method='GET')
-    def get_scale(self, request, name):
-        """Return scale for an application."""
-        app = self.app_store.by_name(name)
-        return Response(status=200, body=app.scale or {})
-
-    @route('/app/{name}/scale', method='PUT')
-    def set_scale(self, request, name):
-        """Set scale for an application."""
-        app = self.app_store.by_name(name)
-        app.set_scale(request.json())
-        return Response(status=200)
-
-    @route('/app', method=['POST'])
-    def create_app(self, request):
-        """Create a new application instance."""
-        data = request.json()
-        self.app_store.create(data['name'], data['repository'],
-                              data.get('text', data['name']))
-        response = Response(status=201)
-        response.headers.add('Location', '/api/' + data['name'])
-        return response
-
-    @route('/app', method=['POST'])
-    def index_app(self, request):
-        """Return a list of all applications."""
-        body = {}
-        for app in self.app_store.apps():
-
-    @wsgify
-    def __call__(self, request):
-        route = mapper.match(request.path_info, request.environ)
-        action = route.pop('action')
         return action(request, **action)
