@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from webob.dec import wsgify
+from webob.exc import HTTPNotFound
 from routes import Mapper, url
 
 mapper = Mapper()
@@ -29,6 +30,10 @@ class _BaseResource(object):
     def _method_not_allowed(self, request, *args, **kw):
         return Response(status=405)
 
+    def _check_not_found(self, item):
+        if item is None:
+            raise HTTPNotFound()
+
     index = _method_not_allowed
     create = _method_not_allowed
     new = _method_not_allowed
@@ -44,7 +49,27 @@ def link(_url_name, **kw):
     if title is not None:
         link['title'] = title
     return link
-    
+
+
+def links(**kw):
+    return kw
+
+
+class AppResource(_BaseResource):
+
+    def _build(self, app):
+        """Return a representation of the app."""
+        return {
+            'name': app.name, 'scale': app.scale,
+            }
+
+    def scale(self, request, name):
+        """Set new scale parameters for the app."""
+        app = self.app_store.by_name(name)
+        self._check_not_found(app)
+        # Simply set them without checking anything really.
+        app.scale = request.json
+        
 
 class DeployResource(_BaseResource):
     """The deploy collection that lives under an application."""
@@ -52,34 +77,38 @@ class DeployResource(_BaseResource):
     def __init__(self, log, app_store, deploy_store):
         pass
 
-    def _make_deploy(self, deploy):
+    def _build(self, app, deploy):
         """Construct a deploy JSON blob."""
         return {
             'build': deploy.build, 'image': deploy.image,
             'pstable': deploy.pstable, 'config': deploy.config,
             'text': deploy.text, 'when': deploy.when.isoformat(' '),
             'id': deploy.id,
-            'links': {
-                '': ''
-                }
+            '_links': links(
+                self=url('deploy', name=app.name, id=deploy.id),
+                )
             }
 
     def index(self, request, name):
         app = self.app_store.by_name(name)
+        self._check_not_found(app)
+
         offset = request.params.get('offset', 0)
         page_size = request.params.get('page_size', 10)
         deploys = list(app.deploys[offset:offset + page_size])
-        body = {'deploys': []}
-        for deploy in deploys:
-            body['deploys'].append(self._make_deploy(deploy))
-        if len(deploys) == n:
-            body['next'] = url('deploys', name=name, offset=offset + page_size,
-                               page_size=page_size)
+        body = {
+            'deploys': [self._build(app, deploy) for deploy in deploys],
+            '_links': links(
+                next=url('deploys', name=app.name, 
+                         offset=offset + page_size,
+                         page_size=page_size))
+            }
         return Response(status=200, body=body)
 
     def create(self, request, name):
-        data = request.json()
         app = self.app_store.by_name(name)
+        self._check_not_found(app)
+        data = request.json
         deploy = self.deploy_store.create(app, data['build'], data['image']‚
             data['pstable'], data['config'], data['text'])
         response = Response(status=201)
@@ -93,13 +122,58 @@ class DeployResource(_BaseResource):
 class API(object):
 
     def __init__(self, log):
-        self._controllers = {
+        self.controllers = {
             'deploys': DeployResource(log, app_store, deploy_store),
             }
-        self.mapper = Mapper()
-        self.mapper.resource("deploy", "deploys", path_prefix='/app/{name}',
-                             collection={'latest': 'GET'})
 
+        self.mapper = Mapper()
+        
+        app_collection = self.mapper.collection("apps", "app",
+            path_prefix='/app', controller="apps",
+            collection_actions=['index', 'create'],
+            member_actions=['show', 'update', 'delete'],
+            member_prefix='/{app_name}')
+        app_collection.member.link('scale', 'scale_app', action='scale')
+        app_collection.member.link('scale', 'scale_app', action='set_scale',
+            method='PUT')
+
+        deploy_collection = self.mapper.collection("deploys", "deploy",
+            path_prefix='/app/{app_name}/deploy', controller="deploys",
+            collection_actions=['index', 'create'],
+            member_actions=['show', 'delete'], member_prefix='/{deploy_id}')
+        deploy_collection.link('latest', 'latest_deploy', action='latest')
+
+        proc_collection = self.mapper.collection("procs", "proc",
+            path_prefix='/app/{app_name}/proc/{proc_name}',
+            controller='procs', collection_actions=['index'],
+            member_actions=['show', 'delete'], member_prefix='/{proc_id')
+
+        hypervisor_collection = self.mapper.collection("hypervisors",
+            "hypervisor", path_prefix='/hypervisor',
+             collection_actions=['index', 'create'],
+             member_actions=['show', 'update', 'delete'],
+             member_prefix='/{host}')
+
+    @wsgify
+    def __call__(self, request):
+        route = mapper.match(request.path_info, request.environ)
+        controller = self.controllers[route.pop('controller')]
+        action = getattr(controller, route.pop('action'))
+        return action(request, **action)
+
+
+def transaction(storm, f):
+    """Make a transaction wrapper around f."""
+    def wrapper(*args, **kw):
+        try:
+            try:
+                return f(*args, **kw)
+            except:
+                store.rollback()
+                raise
+        finally:
+            store.commit()
+    return wrapper
 
 
 class API(object):

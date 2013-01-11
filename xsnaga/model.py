@@ -16,9 +16,6 @@ from datetime import datetime
 from storm.locals import (Int, Unicode, Reference, ReferenceSet, JSON,
                           DateTime, Store)
 
-from pyee import EventEmitter
-
-
 
 class Deploy(object):
     """Representation of a deployment."""
@@ -51,20 +48,8 @@ class App(object):
     repository = Unicode()
     text = Unicode()
 
-    def new_deploy(self, build, image, pstable, config, text, when):
-        deploy = Deploy(app_id=self.id, build=build, image=image,
-                        pstable=pstable, config=config,
-                        text=text, when=when)
-        self.store.add(deploy)
-        self.store.commit()
-        return deploy
 
-    def get_deploy(self, deploy_id):
-        return self.store.find(Deploy, (Deploy.app_id == self.id)
-            & (Deploy.id == deploy_id)).one()
-
-
-class Proc(EventEmitter):
+class Proc(object):
     """
 
     @ivar state: Current known state of the process.  One of the
@@ -87,22 +72,6 @@ class Proc(EventEmitter):
     hypervisor_id = Int()
     hypervisor = Reference(hypervisor_id, 'Hypervisor.id')
     changed_at = DateTime()
-
-    def __init__(self, app, name, deploy_id, proc_id, hypervisor):
-        EventEmitter.__init__(self)
-        self.app = app
-        self.name = name
-        self.deploy = deploy_id
-        self.proc_id = proc_id
-        self.hypervisor = hypervisor
-        self.state = 'unknown'
-
-    def set_state(self, state, when):
-        self.state = state
-        self.changed_at = when
-
-    def __storm_loaded__(self):
-        EventEmitter.__init__(self)
 
 
 class Hypervisor(object):
