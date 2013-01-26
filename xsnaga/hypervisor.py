@@ -76,21 +76,34 @@ class _Hypervisor(object):
 
 class HypervisorService(object):
 
-    def __init__(self, log, clock, eventbus):
-        self.eventbus = eventbus
+    def __init__(self, log, clock, store):
+        self.log = log
+        self.clock = clock
+        self.store = store
         self._hypervisors = {}
 
     def start(self):
-        self.eventbus.on('hypervisor-start', self._start_hypervisor)
-        self.eventbus.on('hypervisor-stop', self._stop_hypervisor)
+        for hypervisor in self.store.items:
+            self._start_hypervisor(hypervisor)
 
-    def get(self, hypervisor_id):
-        return self._hypervisors.get(hypervisor_id)
+    def create(self, *args):
+        model = self.store.create(*args)
+        return self._start_hypervisor(model)
+
+    def remove(self, model):
+        self._stop_hypervisor(model)
+        self.store.remove(model)
+
+    def get(self, host):
+        model = self.store.by_host(host)
+        return (self._hypervisors.get(model.id)
+                if model is not None else none)
 
     def _start_hypervisor(self, model):
         self._hypervisors[model.id] = _hypervisor = _Hypervisor(
             self.log, self.clock, model)
         _hypervisor.start()
+        return _hypervisor
 
     def _stop_hypervisor(self, model):
         _hypervisor = self._hypervisors.pop(model.id, None)

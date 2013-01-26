@@ -14,7 +14,7 @@
 
 from webob.dec import wsgify
 from webob.exc import HTTPNotFound, HTTPBadRequest
-from routes import Mapper, url
+from routes import Mapper, url, URLGenerator
 
 
 class _BaseResource(object):
@@ -41,7 +41,7 @@ class _BaseResource(object):
     show = _method_not_allowed
 
 
-def _build_app(app):
+def _build_app(url, app):
     """Return a representation of the app."""
     return {
         'kind': 'gilliam#app', 'name': app.name,
@@ -52,13 +52,13 @@ def _build_app(app):
         }
 
 
-def _build_deploy(app, deploy):
+def _build_deploy(url, app, deploy):
     """Return a representation of the deploy."""
     return {
         'kind': 'gilliam#deploy', 'build': deploy.build,
         'image': deploy.image, 'pstable': deploy.pstable,
         'config': deploy.config, 'text': deploy.text,
-        'when': deploy.when.isoformat(' '), 'id': deploy.id,
+        'when': deploy.timestamp.isoformat(' '), 'id': deploy.id,
         '_links': {
             'self': url('deploy', app_name=app.name,
                         deploy_id=deploy.id),
@@ -66,19 +66,29 @@ def _build_deploy(app, deploy):
         }
 
 
+def _build_hypervisor(url, hypervisor):
+    return {
+        'kind': 'gilliam#hypervisor', 'host': hypervisor.host,
+        '_links': {
+            'self': url('hypervisor', host=hypervisor.host)
+            }
+        }
+
+
 class _AppResource(_BaseResource):
     """The app resource."""
 
-    def __init__(self, log, app_store):
+    def __init__(self, log, url, app_store):
         self.log = log
+        self.url = url
         self.app_store = app_store
 
     def create(self, request):
         data = self._assert_request_content(request)
         app = self.app_store.create(data['name'], data['repository'],
                                     data.get('text', data['name']))
-        response = Response(_build_app(app), status=201)
-        response.headers.add('Location', url('app', app_name=app.name))
+        response = Response(json=_build_app(self.url, app), status=201)
+        response.headers.add('Location', self.url('app', app_name=app.name))
         return response
 
     def update(self, request, app_name):
@@ -89,7 +99,7 @@ class _AppResource(_BaseResource):
         app.repository = data['repository']
         app.text = data.get('text', app.name)
         self.app_store.update(app)
-        return Response(_build_app(app), status=200)
+        return Response(json=_build_app(self.url, app), status=200)
 
     def delete(self, request, app_name):
         """Delete the app."""
@@ -102,7 +112,7 @@ class _AppResource(_BaseResource):
         """Return current scale for the app."""
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
-        return Response(app.scale, status=200)
+        return Response(json=app.scale, status=200)
 
     def set_scale(self, request, app_name):
         """Set new scale parameters for the app."""
@@ -116,8 +126,9 @@ class _AppResource(_BaseResource):
 class _DeployResource(_BaseResource):
     """The deploy collection that lives under an application."""
 
-    def __init__(self, log, app_store, deploy_store):
+    def __init__(self, log, url, app_store, deploy_store):
         self.log = log
+        self.url = url
         self.app_store = app_store
         self.deploy_store = deploy_store
 
@@ -127,24 +138,23 @@ class _DeployResource(_BaseResource):
         offset = int(request.params.get('offset', 0))
         page_size = int(request.params.get('page_size', 10))
         deploys = list(app.deploys[offset:offset + page_size])
-
         links = {
-            'self': url('deploys', app_name=app_name,
+            'self': self.url('deploys', app_name=app_name,
                         offset=offset, page_size=page_size),
-            'latest': url('deploy', app_name=app_name,
+            'latest': self.url('deploy', app_name=app_name,
                           deploy_id='latest')
             }
         if offset > 0:
-            links['prev'] = url('deploys', app_name=app.name,
+            links['prev'] = self.url('deploys', app_name=app.name,
                                 offset=offset - page_size,
                                 page_size=page_size)
         if len(deploys) == page_size:
-            links['next'] = url('deploys', app_name=app.name,
+            links['next'] = self.url('deploys', app_name=app.name,
                                 offset=offset + page_size,
                                 page_size=page_size)
 
-        items = [_build_deploy(app, deploy) for deploy in deploys],
-        return Response({'items': items, '_links': links}, status=200)
+        items = [_build_deploy(self.url, app, deploy) for deploy in deploys],
+        return Response(json={'items': items, '_links': links}, status=200)
 
     def create(self, request, app_name):
         """Create a new deploy for the app."""
@@ -154,8 +164,8 @@ class _DeployResource(_BaseResource):
         app.deploy = self.deploy_store.create(app, data['build'], data['image']‚
             data['pstable'], data['config'], data['text'])
         self.app_store.update(app)
-        response = Response(_build_deploy(app, app.deploy), status=201)
-        response.headers.add('Location', url('deploy', app_name=app.name,
+        response = Response(json=_build_deploy(self.url, app, app.deploy), status=201)
+        response.headers.add('Location', self.url('deploy', app_name=app.name,
                                              deploy_id=app.deploy.id))
         return response
 
@@ -165,7 +175,7 @@ class _DeployResource(_BaseResource):
         self._check_not_found(app)
         deploy = self.by_id_for_app(int(deploy_id), app)
         self._check_not_found(deploy)
-        return Response(_build_deploy(app, deploy), status=200)
+        return Response(json=_build_deploy(self.url, app, deploy), status=200)
 
     def delete(self, request, app_name, deploy_id):
         app = self.app_store.by_name(app_name)
@@ -181,19 +191,55 @@ class _DeployResource(_BaseResource):
         """Latest deploy."""
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
-        return Response(_build_deploy(app, app.deploy), status=200)
+        return Response(json=_build_deploy(self.url, app, app.deploy), status=200)
+
+
+class _HypervisorResource(_BaseResource):
+    """Resource controller for our hypervisors."""
+
+    def __init__(self, log, url, hypervisor_service):
+        self.log = log
+        self.url = url
+        self.service = hypervisor_service
+
+    def index(self):
+        body = {}
+        for controller in self.service.:
+            body[hypervisor.name] = _build_hypervisor(self.url, hypervisor)
+        return Response(json=body, status=200)
+
+    def _get(self, request, host):
+        controller = self.service.get(host)
+        if hypervisor is None:
+            raise HTTPNotFound()
+        return controller
+
+    def show(self, request, host):
+        controller = self._get(host)
+        return Response(json=_build_hypervisor(self.url, controller.model),
+                        status=200)
+
+    def create(self, request):
+        """Create a hypervisor."""
+        data = self._assert_request_content(request)
+        controller = self.service.create(request.json['host'])
+        return Response(json=_build_hypervisor(self.url, controller.model),
+                        status=201)
 
 
 class API(object):
     """Our REST API WSGI application."""
 
-    def __init__(self, log, clock, app_store, proc_store, deploy_store):
-        self.controllers = {
-            'apps': _AppResource(log, app_store),
-            'deploys': _DeployResource(log, app_store, deploy_store),
-            }
-
+    def __init__(self, log, clock, app_store, proc_store, deploy_store,
+                 hypervisor_service):
         self.mapper = Mapper()
+        self.controllers = {
+            'apps': _AppResource(log, URLGenerator(self.mapper), app_store),
+            'deploys': _DeployResource(log, URLGenerator(self.mapper),
+                                       app_store, deploy_store),
+            'hypervisor': _HypervisorResource(log, URLGenerator(self.mapper),
+                                              hypervisor_service)
+            }
         
         app_collection = self.mapper.collection("apps", "app",
             path_prefix='/app', controller="apps",
@@ -218,7 +264,7 @@ class API(object):
         hypervisor_collection = self.mapper.collection("hypervisors",
             "hypervisor", path_prefix='/hypervisor',
              collection_actions=['index', 'create'],
-             member_actions=['show', 'update', 'delete'],
+             member_actions=['show', 'delete'],
              member_prefix='/{host}')
 
     @wsgify

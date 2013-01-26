@@ -28,7 +28,7 @@ class Deploy(object):
     pstable = JSON()
     config = JSON()
     text = Unicode()
-    when = DateTime()
+    timestamp = DateTime()
 
 
 class App(object):

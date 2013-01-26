@@ -114,8 +114,7 @@ class AppStore(object):
 
 class DeployStore(object):
 
-    def __init__(self, log, clock, store):
-        self.log = log
+    def __init__(self, clock, store):
         self.clock = clock
         self.store = store
 
@@ -128,7 +127,7 @@ class DeployStore(object):
         deploy.pstable = pstable
         deploy.config = config
         deploy.text = text
-        deploy.when = datetime.datetime.utcfromtimestamp(self.clock.time())
+        deploy.timestamp = datetime.datetime.utcfromtimestamp(self.clock.time())
         self.store.add(deploy)
         return deploy
 
@@ -136,3 +135,29 @@ class DeployStore(object):
         """Return a specific deploy."""
         return self.store.find(Deploy, (Deploy.app_id == app.id) & (
                 Deploy.id == id)).one()
+
+
+class HypervisorStore(object):
+
+    def __init__(self, store):
+        self.store = store
+
+    @transaction
+    def create(self, host):
+        hypervisor = Hypervisor()
+        hypervisor.host = host
+        self.store.add(hypervisor)
+        return deploy
+
+    def by_host(self, host):
+        """Return a specific hypervisor by host."""
+        return self.store.find(Hypervisor, Hypervisor.host == host).one()
+
+    @property
+    def items(self):
+        """."""
+        return self.store.find(Hypervisor)
+
+    @transaction
+    def remove(self, hypervisor):
+        self.store.remove(hypervisor)
