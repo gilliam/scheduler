@@ -14,13 +14,14 @@
 
 from webob.dec import wsgify
 from webob.exc import HTTPNotFound, HTTPBadRequest
-from routes import Mapper, url, URLGenerator
+from webob import Response
+from routes import Mapper, URLGenerator
 
 
 class _BaseResource(object):
     """Base resource that do not allow anything."""
 
-    def _method_not_allowed(self, request, *args, **kw):
+    def _method_not_allowed(*args, **kw):
         return Response(status=405)
 
     def _check_not_found(self, item):
@@ -70,7 +71,7 @@ def _build_hypervisor(url, hypervisor):
     return {
         'kind': 'gilliam#hypervisor', 'host': hypervisor.host,
         '_links': {
-            'self': url('hypervisor', host=hypervisor.host)
+            'self': url('hypervisor', hostname=hypervisor.host)
             }
         }
 
@@ -83,15 +84,22 @@ class _AppResource(_BaseResource):
         self.url = url
         self.app_store = app_store
 
-    def create(self, request):
+    def index(self, request, format=None):
+        """."""
+        apps = self.app_store.apps()
+        items = [_build_app(self.url, app) for app in apps]
+        return Response(json={'items': items}, status=200)
+
+    def create(self, request, format=None):
         data = self._assert_request_content(request)
         app = self.app_store.create(data['name'], data['repository'],
                                     data.get('text', data['name']))
+        print repr(app)
         response = Response(json=_build_app(self.url, app), status=201)
         response.headers.add('Location', self.url('app', app_name=app.name))
         return response
 
-    def update(self, request, app_name):
+    def update(self, request, app_name, format=None):
         """Update an existing app."""
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
@@ -101,20 +109,20 @@ class _AppResource(_BaseResource):
         self.app_store.update(app)
         return Response(json=_build_app(self.url, app), status=200)
 
-    def delete(self, request, app_name):
+    def delete(self, request, app_name, format=None):
         """Delete the app."""
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
         self.app_store.remove(app)
         return Response(status=204)
 
-    def scale(self, request, app_name):
+    def scale(self, request, app_name, format=None):
         """Return current scale for the app."""
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
         return Response(json=app.scale, status=200)
 
-    def set_scale(self, request, app_name):
+    def set_scale(self, request, app_name, format=None):
         """Set new scale parameters for the app."""
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
@@ -156,12 +164,12 @@ class _DeployResource(_BaseResource):
         items = [_build_deploy(self.url, app, deploy) for deploy in deploys],
         return Response(json={'items': items, '_links': links}, status=200)
 
-    def create(self, request, app_name):
+    def create(self, request, app_name, format=None):
         """Create a new deploy for the app."""
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
         data = self._assert_request_content(request)
-        app.deploy = self.deploy_store.create(app, data['build'], data['image']‚
+        app.deploy = self.deploy_store.create(app, data['build'], data['image'],
             data['pstable'], data['config'], data['text'])
         self.app_store.update(app)
         response = Response(json=_build_deploy(self.url, app, app.deploy), status=201)
@@ -169,15 +177,18 @@ class _DeployResource(_BaseResource):
                                              deploy_id=app.deploy.id))
         return response
 
-    def show(self, request, app_name, deploy_id):
+    def show(self, request, app_name, deploy_id, format=None):
         """Return a specific deploy."""
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
-        deploy = self.by_id_for_app(int(deploy_id), app)
+        if deploy_id == 'latest':
+            deploy = app.deploy
+        else:
+            deploy = self.deploy_store.by_id_for_app(int(deploy_id), app)
         self._check_not_found(deploy)
         return Response(json=_build_deploy(self.url, app, deploy), status=200)
 
-    def delete(self, request, app_name, deploy_id):
+    def delete(self, request, app_name, deploy_id, format=None):
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
         deploy = self.by_id_for_app(int(deploy_id), app)
@@ -187,11 +198,29 @@ class _DeployResource(_BaseResource):
         self.deploy_store.remove(deploy)
         return Response(status=204)
 
-    def latest(self, request, app_name):
+    def latest(self, request, app_name, format=None):
         """Latest deploy."""
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
         return Response(json=_build_deploy(self.url, app, app.deploy), status=200)
+
+
+class _ProcResource(_BaseResource):
+
+    def __init__(self, log, url, proc_store):
+        self.log = log
+        self.url = url
+        self.proc_store = proc_store
+
+    def set_state(self, request, app_name, proc_name, proc_id, format=None):
+        """Set state for a specific process."""
+        proc = self.proc_store.by_app_proc_and_id(app_name, proc_name, proc_id)
+        if proc is not None:
+            proc.state = unicode(request.params.get('state'))
+            proc.port = int(request.params.get('port'))
+            if 'host' in request.params:
+                proc.host = unicode(request.params.get('host'))
+            self.proc_store.update(proc)
 
 
 class _HypervisorResource(_BaseResource):
@@ -204,8 +233,8 @@ class _HypervisorResource(_BaseResource):
 
     def index(self):
         body = {}
-        for controller in self.service.:
-            body[hypervisor.name] = _build_hypervisor(self.url, hypervisor)
+        for controller in self.service.hypervisors():
+            body[hypervisor.name] = _build_hypervisor(self.url, controller.model)
         return Response(json=body, status=200)
 
     def _get(self, request, host):
@@ -214,12 +243,12 @@ class _HypervisorResource(_BaseResource):
             raise HTTPNotFound()
         return controller
 
-    def show(self, request, host):
-        controller = self._get(host)
+    def show(self, request, hostname):
+        controller = self._get(hostname)
         return Response(json=_build_hypervisor(self.url, controller.model),
                         status=200)
 
-    def create(self, request):
+    def create(self, request, format=None):
         """Create a hypervisor."""
         data = self._assert_request_content(request)
         controller = self.service.create(request.json['host'])
@@ -231,14 +260,14 @@ class API(object):
     """Our REST API WSGI application."""
 
     def __init__(self, log, clock, app_store, proc_store, deploy_store,
-                 hypervisor_service):
+                 hypervisor_service, environ={}):
         self.mapper = Mapper()
+        self.url = URLGenerator(self.mapper, environ)
         self.controllers = {
-            'apps': _AppResource(log, URLGenerator(self.mapper), app_store),
-            'deploys': _DeployResource(log, URLGenerator(self.mapper),
-                                       app_store, deploy_store),
-            'hypervisor': _HypervisorResource(log, URLGenerator(self.mapper),
-                                              hypervisor_service)
+            'apps': _AppResource(log, self.url, app_store),
+            'deploys': _DeployResource(log, self.url, app_store, deploy_store),
+            'hypervisor': _HypervisorResource(log, self.url, hypervisor_service),
+            'procs': _ProcResource(log, self.url, proc_store),
             }
         
         app_collection = self.mapper.collection("apps", "app",
@@ -259,17 +288,27 @@ class API(object):
         proc_collection = self.mapper.collection("procs", "proc",
             path_prefix='/app/{app_name}/proc/{proc_name}',
             controller='procs', collection_actions=['index'],
-            member_actions=['show', 'delete'], member_prefix='/{proc_id')
+            member_actions=['show', 'delete'], member_prefix='/{proc_id}')
+        proc_collection.member.link('state', 'set_state', action='set_state',
+                                    method='POST')
 
         hypervisor_collection = self.mapper.collection("hypervisors",
             "hypervisor", path_prefix='/hypervisor',
-             collection_actions=['index', 'create'],
-             member_actions=['show', 'delete'],
-             member_prefix='/{host}')
+            collection_actions=['index', 'create'],
+            member_actions=['show', 'delete'],
+            member_prefix='/{hostname}')
+        print self.mapper
+
+    def callback_url(self, proc):
+        return self.url('set_state', app_name=proc.app.name,
+                        proc_name=proc.name, proc_id=proc.proc_id,
+                        qualified=True)
 
     @wsgify
     def __call__(self, request):
-        route = mapper.match(request.path_info, request.environ)
+        route = self.mapper.match(request.path_info, request.environ)
+        if route is None:
+            raise HTTPNotFound()
         controller = self.controllers[route.pop('controller')]
         action = getattr(controller, route.pop('action'))
-        return action(request, **action)
+        return action(request, **route)

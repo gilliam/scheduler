@@ -1,5 +1,8 @@
-gevent
+git+git://github.com/SiteSupport/gevent.git
 glock
 Routes
 WebOb
 docopt
+storm
+requests
+shortuuid

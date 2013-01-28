@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import requests
+import json
+from requests.exceptions import RequestException
+from glock.task import LoopingCall
+
 
 class _Hypervisor(object):
 
@@ -20,29 +25,40 @@ class _Hypervisor(object):
         self.log = log
         self.clock = clock
         self.model = model
-        self._proc_store = proc_store
+        self.proc_store = proc_store
         self._health_check = LoopingCall(clock, self._check)
         self._interval = interval
+        self.requests = requests
+        self.base_url = 'http://%s:6000/proc' % (self.model.host,)
 
     def start(self):
         """Start interacting with the remote hypervisor."""
         self._health_check.start(self._interval)
 
     def _encode_proc_name(self, proc):
-        return '%s.%d.%s.%s' % (proc.app.name, 
-                                proc.deploy.id,
+        # We do not want to have dots in the name (routes issues).
+        # and dash may be used in the app name.
+        return '%s_%d_%s_%s' % (proc.app.name, 
+                                proc.deploy,
                                 proc.name,
                                 proc.proc_id)
 
     def _check(self):
         procs = dict([(self._encode_proc_name(proc), proc)
-            for proc in self._proc_store.procs_for_hypervisor(self.model)])
+            for proc in self.proc_store.procs_for_hypervisor(self.model)])
         unwanted_proc = set()
+        seen_proc = set()
 
-        uri = 'http://%s/proc' % (self.model.host,)
+        uri = 'http://%s:6000/proc' % (self.model.host,)
         while uri is not None:
-            response = self.requests.get(uri)
-            response.raise_for_status()
+            try:
+                response = self.requests.get(uri)
+                response.raise_for_status()
+            except RequestException, re:
+                self.log.error('could not talk to hypervisor: %r' % (re,))
+                # Just return.  We'll retry in a few anyway.
+                return
+
             data = response.json()
             uri = data.get('_links', {}).get('next')
             for proc_name, spec in data.iteritems():
@@ -53,34 +69,61 @@ class _Hypervisor(object):
                     unwanted_proc.add(proc_name)
                 elif proc.state in ('stop',):
                     unwanted_proc.add(proc_name)
+                seen_proc.add(proc_name)
         for proc_name in unwanted_proc:
-            self._stop_proc(procs.get(proc_name))
+            self._stop_proc(proc_name)
 
-    def _spawn_proc(self, proc, callback_url, image, command,
-                    config):
+        # For processes that were missing (and that has not state
+        # init), we just remove them straight away.
+
+        missing_procs = set(procs.keys()) - seen_proc
+        for proc_name in missing_procs:
+            proc = procs[proc_name]
+            if proc.state in (u'running', u'boot'):
+                self.proc_store.set_state(proc, u'abort')
+
+    def spawn_proc(self, proc, callback_url, image, command, config):
         """Spawn a new process."""
-
-    def _stop_proc(self, proc):
-        """Stop process on remote hypervisor."""
+        self.log.info('spawn new proc(%s, %s): command=%r' % (
+                proc.name, proc.proc_id, command))
         try:
-            response = self.requests.delete('http://%s/proc/%s' % (
-                    proc.hypervisor.host,
-                    self._encode_proc_name(proc)))
+            request = {'name': self._encode_proc_name(proc),
+                       'image': image, 'command': command,
+                       'config': config, 'callback': callback_url}
+            response = self.requests.post(self.base_url,
+                data=json.dumps(request))
             response.raise_for_status()
-        except HTTPError:
-            self.log.error(
+        except RequestException, re:
+            self.log.error('could not talk to hypervisor: %r' % (re,))
+            # Just return.  We'll retry in a few anyway.
+
+    def _stop_proc(self, proc_name):
+        try:
+            response = self.requests.delete('%s/%s' % (self.base_url, proc_name))
+            response.raise_for_status()
+        except RequestException:
+            self.log.exception(
                 "failed to remove proc %s from hypervisor" % (
                     proc))
             # FIXME: retry?
 
+    def stop_proc(self, proc):
+        """Stop process on remote hypervisor."""
+        self._stop_proc(self._encode_proc_name(proc))
+
 
 class HypervisorService(object):
 
-    def __init__(self, log, clock, store):
+    def __init__(self, log, clock, store, proc_store, interval=30):
         self.log = log
         self.clock = clock
         self.store = store
+        self.proc_store = proc_store
         self._hypervisors = {}
+        self.interval = 30
+
+    def hypervisors():
+        return self._hypervisors.itervalues()
 
     def start(self):
         for hypervisor in self.store.items:
@@ -101,7 +144,8 @@ class HypervisorService(object):
 
     def _start_hypervisor(self, model):
         self._hypervisors[model.id] = _hypervisor = _Hypervisor(
-            self.log, self.clock, model)
+            self.log.getChild(model.host), self.clock, model,
+            self.interval, self.proc_store)
         _hypervisor.start()
         return _hypervisor
 

@@ -14,7 +14,7 @@
 
 import datetime
 
-from xsnaga.model import Proc, App, Deploy
+from xsnaga.model import Proc, App, Deploy, Hypervisor
 
 
 def transaction(f):
@@ -24,13 +24,14 @@ def transaction(f):
                 return f(self, *args, **kw)
             except Exception:
                 self.store.rollback()
+                raise
         finally:
             self.store.commit()
     return wrapper
 
 
 def _datetime(clock):
-    return datetime.datetime.utcfromtimestamp(clock.time())
+    return datetime.datetime.utcfromtimestamp(clock)
 
 
 class ProcStore(object):
@@ -41,22 +42,25 @@ class ProcStore(object):
         self.store = store
 
     @transaction
-    def create(self, app, name, deploy_id, proc_id,
-               hypervisor, created_at):
+    def create(self, app, name, deploy_id, proc_id, hypervisor):
         p = Proc()
         p.name = name
-        p.app_id = app_id
+        p.app_id = app.id
         p.deploy = deploy_id
-        p.proc_id = proc_id
+        p.proc_id = unicode(proc_id)
         p.hypervisor = hypervisor
         p.changed_at = _datetime(self.clock.time())
-        p.state = 'init'
+        p.state = u'init'
         self.store.add(p)
         return p
 
     @transaction
     def remove(self, proc):
         self.store.remove(proc)
+
+    @transaction
+    def update(self, proc):
+        proc.changed_at = _datetime(self.clock.time())
 
     @transaction
     def set_state(self, proc, state):
@@ -71,24 +75,33 @@ class ProcStore(object):
         """
         return self.store.find(Proc, Proc.app_id == app.id)
 
+    def by_app_proc_and_id(self, app_name, proc_name, proc_id):
+        return self.store.find(Proc, (Proc.app_id == App.id)
+                               & (App.name == app_name)
+                               & (Proc.name == proc_name)
+                               & (Proc.proc_id == proc_id)).one()
+
     def procs_for_hypervisor(self, hypervisor):
         """Return all processes for the given hypervisor.
         """
         return self.store.find(Proc, Proc.hypervisor_id == hypervisor.id)
 
     def expired_state_procs(self):
-        """Return all processes that are 'expired' (has a state that is either
-        abort or exit).
+        """Return all processes that are 'expired'.
         """
-        return self.store.find(Proc, (Proc.state == 'abort')
-                                     | (Proc.state == 'exit'))
+        return self.store.find(Proc, (Proc.state == u'abort')
+                                     | (Proc.state == u'fail')
+                                     | (Proc.state == u'done'))
 
     def expired_deploy_procs(self):
         """Return all processes that have an outdated deploy."""
-        states = ('init', 'boot', 'running')
+        states = (u'init', u'boot', u'running')
         return self.store.find(Proc,
-              Proc.state.is_in(states) & Proc.app_id == App.id
-              & App.deploy == Deploy.id & Deploy.id != Proc.deploy)
+              Proc.state.is_in(states) & (Proc.app_id == App.id)
+              & (App.deploy == Deploy.id) & (Deploy.id != Proc.deploy))
+
+    def all(self):
+        return self.store.find(Proc)
 
 
 class AppStore(object):
@@ -100,9 +113,21 @@ class AppStore(object):
     @transaction
     def create(self, name, repository, text):
         """Create a new application."""
-        app = App(name=name, repository=repository, text=text)
+        app = App()
+        app.name = name
+        app.repository = repository
+        app.text = text
+        app.scale = {}
         self.store.add(app)
         return app
+
+    @transaction
+    def set_scale(self, app, scale):
+        app.scale = scale
+
+    def update(self, app):
+        self.store.flush()
+        self.store.commit()
 
     def by_name(self, name):
         return self.store.find(App, App.name == name).one()
@@ -147,7 +172,7 @@ class HypervisorStore(object):
         hypervisor = Hypervisor()
         hypervisor.host = host
         self.store.add(hypervisor)
-        return deploy
+        return hypervisor
 
     def by_host(self, host):
         """Return a specific hypervisor by host."""

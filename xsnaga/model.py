@@ -14,7 +14,7 @@
 
 from datetime import datetime
 from storm.locals import (Int, Unicode, Reference, ReferenceSet, JSON,
-                          DateTime, Store)
+                          DateTime, Store, Storm)
 
 
 class Deploy(object):
@@ -49,7 +49,7 @@ class App(object):
     text = Unicode()
 
 
-class Proc(object):
+class Proc(Storm):
     """
 
     @ivar state: Current known state of the process.  One of the
@@ -74,10 +74,10 @@ class Proc(object):
     changed_at = DateTime()
 
 
-class Hypervisor(object):
+class Hypervisor(Storm):
     """."""
     __storm_table__ = 'hypervisor'
 
     id = Int(primary=True)
     host = Unicode()
-    procs = ReferenceSet(Hypervisor.id, Proc.hypervisor_id)
+    procs = ReferenceSet('Hypervisor.id', Proc.hypervisor_id)
