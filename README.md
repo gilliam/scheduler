@@ -1,41 +1,44 @@
 # The Gilliam Orchestrator
 
-(aka Snaga)
+Gilliam is a platform for deploying your 12 factor apps, and this is
+the orchestrator.
 
-The Orchestrator is pretty much the heart of Gilliam app platform.  It
+The orchestrator is pretty much the heart of the Gilliam platform.  It
 is responsible for making sure that your instances are running.  It is
 also the one deciding *where* they should be running.
 
 Right now it also provides the API that the client tool `gilliam`
 uses, but that may very well change in the future.
 
-# Introduction to Gilliam
+# Install
 
-In short, Gilliam is a platform for hosting your [12 factor
-apps](http://12factor.net/).  This philosphy of having a simple
-environment where you run your hopefully stateless and horizontaly
-scalable apps were spearheaded by [Heroku](http://heroku.com).
+It has only been tested on Ubuntu 12.04 with sqlite3.  You need to
+install the python bindings and the client tools for sqlite3.
 
-Gilliam is in no way trying to compete with Heroku.  Our usecase is
-somewhat different. First, Gilliam will not provide any kind of
-multitenant environment. It is assumed that all app are owned and
-operated by the same person or organisation.  Secondly, since we not
-really care about information leakage between instances we just run
-them in a simple chroot jail (this may change in the future though).
-Third, app hosted in Gilliam isn't really intended to be exposed to
-the internet.  Instead the idea is that you use Gilliam to run your
-stack of micro backend services.
+It is recommended that you install in a virtual environment
+(`virtualenv`) rather than risking your systems python installation:
 
-Some of the goals of Gilliam are:
-* easy to deploy services
-* easy to scale services up and down
-* the components of the system are decoupled
+    $ git clone git@github.com:gilliam/orchestrator.git
+    $ cd orchestrator
+    $ virtualenv .
+    $ ./bin/pip install -r requirements.txt
+    $ ./bin/python setup.py install
 
-Non-goals:
-* HTTP routing
-* Multitenant
+Initialize database:
 
-Some problems that have not been addressed yet:
-* Logging
-* Metrics and statistics
-* CPU and memory limitations
+    $ sqlite3 -init schema.sql gilliam.db .quit
+    -- Loading resources from schema.sql
+
+# Running It
+
+If you run the executable `gilliam-orchestrator` with the `--help`
+option it will print out a short help.
+
+    $ ./bin/activate
+    $ ./bin/gilliam-orchestrator sqlite:gilliam.db
+
+At this point the orchestrator is running and accepting requests on
+port 8000 (you can specify port with `--port`).
+
+
+
