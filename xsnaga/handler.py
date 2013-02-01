@@ -105,6 +105,9 @@ class ScaleHandler(_BaseHandler):
         procs = defaultdict(list)
         for proc in self.proc_store.procs_for_app(app):
             procs[proc.name].append(proc)
+        if app.deploy is None:
+            # This app do not have a deploy yet.
+            return
         for name, command in app.deploy.pstable.items():
             if not app.scale:
                 continue
