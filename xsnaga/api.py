@@ -99,7 +99,6 @@ class _AppResource(_BaseResource):
         data = self._assert_request_content(request)
         app = self.app_store.create(data['name'], data['repository'],
                                     data.get('text', data['name']))
-        print repr(app)
         response = Response(json=_build_app(self.url, app), status=201)
         response.headers.add('Location', self.url('app', app_name=app.name))
         return response
@@ -302,7 +301,6 @@ class API(object):
             collection_actions=['index', 'create'],
             member_actions=['show', 'delete'],
             member_prefix='/{hostname}')
-        print self.mapper
 
     def callback_url(self, proc):
         return self.url('set_state', app_name=proc.app.name,
