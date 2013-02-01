@@ -90,6 +90,11 @@ class _AppResource(_BaseResource):
         items = [_build_app(self.url, app) for app in apps]
         return Response(json={'items': items}, status=200)
 
+    def show(self, request, app_name, format=None):
+        app = self.app_store.by_name(app_name)
+        self._check_not_found(app)
+        return Response(json=_build_app(self.url, app), status=200)
+
     def create(self, request, format=None):
         data = self._assert_request_content(request)
         app = self.app_store.create(data['name'], data['repository'],
