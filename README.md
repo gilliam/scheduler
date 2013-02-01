@@ -1,7 +1,7 @@
 # The Gilliam Orchestrator
 
-Gilliam is a platform for deploying your 12 factor apps, and this is
-the orchestrator.
+Gilliam is a platform for deploying your [12 factor
+apps](http://12factor.net/), and this is the orchestrator.
 
 The orchestrator is pretty much the heart of the Gilliam platform.  It
 is responsible for making sure that your instances are running.  It is
