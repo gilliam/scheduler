@@ -33,7 +33,8 @@ from gevent import pywsgi, pool
 from glock.clock import Clock
 from xsnaga.store import ProcStore, AppStore, DeployStore, HypervisorStore
 from xsnaga.hypervisor import HypervisorService
-from xsnaga.api import API
+from xsnaga.api import (API, AppResource, DeployResource,
+                        HypervisorResource, ProcResource)
 from xsnaga.handler import (OldDeployHandler, ExpiredProcHandler,
                             ScaleHandler, LostProcHandler)
 from xsnaga.proc import ProcFactory, RandomPlacementPolicy
@@ -63,6 +64,12 @@ def main():
     proc_factory = ProcFactory(logging.getLogger('proc.factory'),
                                clock, proc_store, policy,
                                hypervisor_service, api.callback_url)
+    api.add('apps', AppResource(api.log, api.url, app_store))
+    api.add('deploys', DeployResource(api.log, api.url, app_store,
+                                      deploy_store))
+    api.add('hypervisor', HypervisorResource(api.log, api.url, hypervisor_service))
+    api.add('procs', ProcResource(api.log, api.url, app_store, proc_store,
+                                  proc_factory))
 
     handlers = []
     handlers.append(OldDeployHandler(logging.getLogger('handler.old-deploy'),

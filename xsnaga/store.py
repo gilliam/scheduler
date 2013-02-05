@@ -68,12 +68,16 @@ class ProcStore(object):
         proc.state = state
         proc.changed_at = _datetime(self.clock.time())
 
-    def procs_for_app(self, app):
+    def procs_for_app(self, app, proc_name=None):
         """Return all processes for the given app.
 
         @return: an interator that will get you all the processes.
         """
-        return self.store.find(Proc, Proc.app_id == app.id)
+        if proc_name is None:
+            return self.store.find(Proc, Proc.app_id == app.id)
+        else:
+            return self.store.find(Proc, (Proc.app_id == app.id)
+                                   & (Proc.name == proc_name))
 
     def by_app_proc_and_id(self, app_name, proc_name, proc_id):
         return self.store.find(Proc, (Proc.app_id == App.id)
