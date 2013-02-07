@@ -80,7 +80,7 @@ def main():
                                  clock, 5, app_store, proc_store, proc_factory,
                                  pool.Pool(5)))
     handlers.append(LostProcHandler(logging.getLogger('handler.lost'),
-                                    clock, 7, proc_store, 30))
+                                    clock, 7, proc_store, 120))
     for handler in handlers:
         handler.start()
     logging.info("Start starting requests on %d" % (
