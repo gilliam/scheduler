@@ -6,3 +6,4 @@ docopt
 storm
 requests
 shortuuid
+honcho

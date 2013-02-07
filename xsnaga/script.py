@@ -12,22 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Orchestrator for Gilliam, a 12 factor application deployment
-system.
-
-Usage:
-  gilliam-orchestrator [options] DATABASE
-
-Options:
-  -h --help                show this help message and quit
-  --version                show version and exit
-  -p, --port PORT          listen on PORT for API requests [default: 8000]
-
-"""
-
 import logging
+import os
 
-from docopt import docopt
 from storm.locals import Store, create_database
 from gevent import pywsgi, pool
 from glock.clock import Clock
@@ -41,9 +28,9 @@ from xsnaga.proc import ProcFactory, RandomPlacementPolicy
 
 
 def main():
-    format = '%(asctime)-15s %(levelname)-8s %(name)s: %(message)s'
+    options = os.environ
+    format = '%(levelname)-8s %(name)s: %(message)s'
     logging.basicConfig(level=logging.DEBUG, format=format)
-    options = docopt(__doc__, version='0.0')
     store = Store(create_database(options['DATABASE']))
     clock = Clock()
     proc_store = ProcStore(clock, store)
@@ -56,8 +43,8 @@ def main():
     hypervisor_service.start()
     policy = RandomPlacementPolicy(logging.getLogger('placement.random'),
                                    hypervisor_store)
-    environ = {'SERVER_NAME': 'localhost',
-               'SERVER_PORT': str(options['--port'])}
+    environ = {'SERVER_NAME': options.get('SERVER_NAME', 'localhost'),
+               'SERVER_PORT': str(options['PORT'])}
 
     api = API(logging.getLogger('api'), clock, app_store, proc_store,
               deploy_store, hypervisor_service, environ)
@@ -83,6 +70,9 @@ def main():
                                     clock, 7, proc_store, 120))
     for handler in handlers:
         handler.start()
-    logging.info("Start starting requests on %d" % (
-            int(options['--port'])))
-    pywsgi.WSGIServer(('', int(options['--port'])), api).serve_forever()
+    logging.info("Start serving requests on %d" % (int(options['PORT'])))
+    pywsgi.WSGIServer(('', int(options['PORT'])), api).serve_forever()
+
+
+if __name__ == '__main__':
+    main()

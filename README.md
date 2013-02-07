@@ -22,23 +22,19 @@ It is recommended that you install in a virtual environment
     $ cd orchestrator
     $ virtualenv .
     $ ./bin/pip install -r requirements.txt
-    $ ./bin/python setup.py install
 
 Initialize database:
 
     $ sqlite3 -init schema.sql gilliam.db .quit
     -- Loading resources from schema.sql
 
-# Running It
+# Running
 
-If you run the executable `gilliam-orchestrator` with the `--help`
-option it will print out a short help.
+Start the application using `honcho`:
 
-    $ ./bin/activate
-    $ ./bin/gilliam-orchestrator sqlite:gilliam.db
+    $ . ./bin/activate
+    $ honcho start -p 8000
 
-At this point the orchestrator is running and accepting requests on
-port 8000 (you can specify port with `--port`).
-
+If you need to change any settings look at the `.env` file.
 
 
