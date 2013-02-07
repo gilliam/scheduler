@@ -42,11 +42,11 @@ class ProcStore(object):
         self.store = store
 
     @transaction
-    def create(self, app, name, deploy_id, proc_id, hypervisor):
+    def create(self, app, name, deploy, proc_id, hypervisor):
         p = Proc()
         p.name = name
         p.app_id = app.id
-        p.deploy = deploy_id
+        p.deploy = deploy
         p.proc_id = unicode(proc_id)
         p.hypervisor = hypervisor
         p.changed_at = _datetime(self.clock.time())
@@ -102,7 +102,7 @@ class ProcStore(object):
         states = (u'init', u'boot', u'running')
         return self.store.find(Proc,
               Proc.state.is_in(states) & (Proc.app_id == App.id)
-              & (App.deploy == Deploy.id) & (Deploy.id != Proc.deploy))
+              & (App.deploy == Deploy.id) & (Deploy.id != Proc.deploy_id))
 
     def all(self):
         return self.store.find(Proc)

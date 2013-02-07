@@ -10,7 +10,7 @@ CREATE TABLE proc(
        proc_id VARCHAR(255) NOT NULL,
        name VARCHAR(255) NOT NULL,
        state VARCHAR(64) NOT NULL,
-       deploy INT NOT NULL,
+       deploy_id INT NOT NULL,
        host VARCHAR(255),
        port INT,
        hypervisor_id INT NOT NULL,

@@ -21,13 +21,16 @@ from routes import Mapper, URLGenerator
 
 def _build_app(url, app):
     """Return a representation of the app."""
-    return {
+    data = {
         'kind': 'gilliam#app', 'name': app.name,
         'repository': app.repository, 'text': app.text,
         '_links': {
             'self': url('app', app_name=app.name),
             }
         }
+    if app.deploy:
+        data['deploy'] = _build_deploy(url, app, app.deploy)
+    return data
 
 
 def _build_deploy(url, app, deploy):
@@ -57,8 +60,7 @@ def _build_proc(url, proc):
     return {
         'kind': 'gilliam#proc', 'id': proc.proc_id,
         'name': proc.name, 'state': proc.state,
-        'deploy': url('deploy', app_name=proc.app.name, 
-                      deploy_id=proc.deploy),
+        'deploy': _build_deploy(url, proc.app, proc.deploy),
         'host': proc.host or proc.hypervisor.host,
         'port': proc.port,
         'changed_at': proc.changed_at.isoformat(' '),

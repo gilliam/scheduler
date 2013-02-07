@@ -54,7 +54,7 @@ class ProcFactory(object):
 
     def spawn_proc(self, app, deploy, name, command):
         hypervisor = self.policy.allocate(app, name)
-        proc = self.proc_store.create(app, name, deploy.id,
+        proc = self.proc_store.create(app, name, deploy,
                                       shortuuid.uuid(),
                                       hypervisor)
 

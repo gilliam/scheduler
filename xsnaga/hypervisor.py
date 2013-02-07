@@ -39,7 +39,7 @@ class _Hypervisor(object):
         # We do not want to have dots in the name (routes issues).
         # and dash may be used in the app name.
         return '%s_%d_%s_%s' % (proc.app.name, 
-                                proc.deploy,
+                                proc.deploy.id,
                                 proc.name,
                                 proc.proc_id)
 
