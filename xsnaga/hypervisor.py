@@ -103,8 +103,7 @@ class _Hypervisor(object):
             response.raise_for_status()
         except RequestException:
             self.log.exception(
-                "failed to remove proc %s from hypervisor" % (
-                    proc))
+                "failed to remove proc %s from hypervisor" % (proc_name,))
             # FIXME: retry?
 
     def stop_proc(self, proc):
