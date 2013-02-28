@@ -14,7 +14,8 @@ CREATE TABLE proc(
        host VARCHAR(255),
        port INT,
        hypervisor_id INT NOT NULL,
-       changed_at TIMESTAMP NOT NULL
+       changed_at TIMESTAMP NOT NULL,
+       cont_entity TEXT
 );
 
 CREATE TABLE app(

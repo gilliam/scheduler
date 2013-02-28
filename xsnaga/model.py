@@ -73,6 +73,7 @@ class Proc(Storm):
     hypervisor_id = Int()
     hypervisor = Reference(hypervisor_id, 'Hypervisor.id')
     changed_at = DateTime()
+    cont_entity = Unicode()
 
 
 class Hypervisor(Storm):

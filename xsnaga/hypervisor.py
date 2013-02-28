@@ -14,6 +14,7 @@
 
 import requests
 import json
+from urlparse import urljoin
 from requests.exceptions import RequestException
 from glock.task import LoopingCall
 
@@ -38,13 +39,10 @@ class _Hypervisor(object):
     def _encode_proc_name(self, proc):
         # We do not want to have dots in the name (routes issues).
         # and dash may be used in the app name.
-        return '%s_%d_%s_%s' % (proc.app.name, 
-                                proc.deploy.id,
-                                proc.name,
-                                proc.proc_id)
+        return '%s.%s' % (proc.name, proc.proc_id)
 
     def _check(self):
-        procs = dict([(self._encode_proc_name(proc), proc)
+        procs = dict([((proc.app.name, self._encode_proc_name(proc)), proc)
             for proc in self.proc_store.procs_for_hypervisor(self.model)])
         unwanted_proc = set()
         seen_proc = set()
@@ -64,30 +62,34 @@ class _Hypervisor(object):
             for proc_name, spec in data.iteritems():
                 if proc_name == '_links':
                     continue
-                proc = procs.get(proc_name)
+                proc = procs.get((spec['app'], spec['name']))
                 if proc is None:
                     unwanted_proc.add(proc_name)
                 elif proc.state in ('stop',):
                     unwanted_proc.add(proc_name)
                 seen_proc.add(proc_name)
+
+        uri = 'http://%s:6000/proc' % (self.model.host,)
         for proc_name in unwanted_proc:
-            self._stop_proc(proc_name)
+            print "DELET", proc_name, uri
+            self._stop_proc(urljoin(uri, proc_name))
 
         # For processes that were missing (and that has not state
         # init), we just remove them straight away.
 
-        missing_procs = set(procs.keys()) - seen_proc
-        for proc_name in missing_procs:
-            proc = procs[proc_name]
-            if proc.state in (u'running', u'boot'):
-                self.proc_store.set_state(proc, u'abort')
+        # missing_procs = set(procs.keys()) - seen_proc
+        # for proc_name in missing_procs:
+        #     proc = procs[proc_name]
+        #     if proc.state in (u'running', u'boot'):
+        #         self.proc_store.set_state(proc, u'abort')
 
-    def spawn_proc(self, proc, callback_url, image, command, config):
+    def spawn_proc(self, proc, app, callback_url, image, command, config):
         """Spawn a new process."""
         self.log.info('spawn new proc(%s, %s): command=%r' % (
                 proc.name, proc.proc_id, command))
         try:
-            request = {'name': self._encode_proc_name(proc),
+            proc_name = self._encode_proc_name(proc)
+            request = {'app': app.name, 'name': proc_name,
                        'image': image, 'command': command,
                        'config': config, 'callback': callback_url}
             response = self.requests.post(self.base_url,
@@ -96,19 +98,26 @@ class _Hypervisor(object):
         except RequestException, re:
             self.log.error('could not talk to hypervisor: %r' % (re,))
             # Just return.  We'll retry in a few anyway.
+        else:
+            proc.cont_entity = unicode(urljoin(self.base_url,
+                response.headers.get('Location')))
+            print "PROC", proc.cont_entity
+            self.proc_store.update(proc)
 
-    def _stop_proc(self, proc_name):
+    def _stop_proc(self, url):
         try:
-            response = self.requests.delete('%s/%s' % (self.base_url, proc_name))
+            response = self.requests.delete(url)
             response.raise_for_status()
         except RequestException:
             self.log.exception(
-                "failed to remove proc %s from hypervisor" % (proc_name,))
+                "failed to remove proc %s from hypervisor" % (url,))
             # FIXME: retry?
 
     def stop_proc(self, proc):
         """Stop process on remote hypervisor."""
-        self._stop_proc(self._encode_proc_name(proc))
+        print "WOOT", proc
+        if proc.cont_entity:
+            self._stop_proc(proc.cont_entity)
 
 
 class HypervisorService(object):

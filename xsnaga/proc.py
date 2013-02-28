@@ -57,10 +57,9 @@ class ProcFactory(object):
         proc = self.proc_store.create(app, name, deploy,
                                       shortuuid.uuid(),
                                       hypervisor)
-
         try:
             controller = self.hypervisor_service.get(hypervisor.host)
-            controller.spawn_proc(proc, self.callback_url(proc),
+            controller.spawn_proc(proc, app, self.callback_url(proc),
                                   deploy.image, command, deploy.config)
         except Exception:
             self.proc_store.set_state(proc, u'abort')
