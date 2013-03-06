@@ -1,6 +1,9 @@
 CREATE TABLE hypervisor(
        id INTEGER PRIMARY KEY AUTOINCREMENT,
-       host VARCHAR(255)
+       host TEXT NOT NULL,
+       port INT NOT NULL,
+       capacity INT NOT NULL,
+       options TEXT NOT NULL
 );
 CREATE UNIQUE INDEX host_idx ON hypervisor(host);
 
@@ -11,8 +14,6 @@ CREATE TABLE proc(
        name VARCHAR(255) NOT NULL,
        state VARCHAR(64) NOT NULL,
        deploy_id INT NOT NULL,
-       host VARCHAR(255),
-       port INT,
        hypervisor_id INT NOT NULL,
        changed_at TIMESTAMP NOT NULL,
        cont_entity TEXT
@@ -22,9 +23,10 @@ CREATE TABLE app(
        id INTEGER PRIMARY KEY AUTOINCREMENT,
        name VARCHAR(255) NOT NULL,
        deploy_id INT,
-       scale VARCHAR(1000),
-       repository VARCHAR(255),
-       text VARCHAR(1000)
+       scale TEXT,
+       repository TEXT,
+       text TEXT,
+       options TEXT
 );
 CREATE UNIQUE INDEX name_idx ON app(name);
 

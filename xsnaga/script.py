@@ -19,12 +19,18 @@ from storm.locals import Store, create_database
 from gevent import pywsgi, pool
 from glock.clock import Clock
 from xsnaga.store import ProcStore, AppStore, DeployStore, HypervisorStore
-from xsnaga.hypervisor import HypervisorService
+from xsnaga.hypervisor import HypervisorController, HypervisorClient
 from xsnaga.api import (API, AppResource, DeployResource,
                         HypervisorResource, ProcResource)
 from xsnaga.handler import (OldDeployHandler, ExpiredProcHandler,
                             ScaleHandler, LostProcHandler)
+from xsnaga.health import HealthStore
 from xsnaga.proc import ProcFactory, RandomPlacementPolicy
+from pyee import EventEmitter
+
+
+HEALTH_THRESHOLD = 2
+HEALTH_CHECK_INTERVAL = 30
 
 
 def main():
@@ -33,28 +39,37 @@ def main():
     logging.basicConfig(level=logging.DEBUG, format=format)
     store = Store(create_database(options['DATABASE']))
     clock = Clock()
+    eventbus = EventEmitter()
     proc_store = ProcStore(clock, store)
     app_store = AppStore(store)
     deploy_store = DeployStore(clock, store)
     hypervisor_store = HypervisorStore(store)
-    hypervisor_service = HypervisorService(
-        logging.getLogger('hypervisor.service'), clock, hypervisor_store,
-        proc_store)
-    hypervisor_service.start()
+    health_store = HealthStore(clock, HEALTH_THRESHOLD)
+
+    def hypervisor_client_factory(model):
+        return HypervisorClient(logging.getLogger(
+                'hypervisor.client[%s]' % (model.host,)),
+                clock, HEALTH_CHECK_INTERVAL, proc_store,
+                health_store, model)
+
+    hypervisor_controller = HypervisorController(
+        eventbus, hypervisor_store, hypervisor_client_factory)
+    hypervisor_controller.start()
     policy = RandomPlacementPolicy(logging.getLogger('placement.random'),
                                    hypervisor_store)
     environ = {'SERVER_NAME': options.get('SERVER_NAME', 'localhost'),
                'SERVER_PORT': str(options['PORT'])}
 
-    api = API(logging.getLogger('api'), clock, app_store, proc_store,
-              deploy_store, hypervisor_service, environ)
+    api = API(logging.getLogger('api'), environ)
     proc_factory = ProcFactory(logging.getLogger('proc.factory'),
-                               clock, proc_store, policy,
-                               hypervisor_service, api.callback_url)
+                               clock, eventbus, proc_store, policy,
+                               api.callback_url)
     api.add('apps', AppResource(api.log, api.url, app_store))
     api.add('deploys', DeployResource(api.log, api.url, app_store,
                                       deploy_store))
-    api.add('hypervisor', HypervisorResource(api.log, api.url, hypervisor_service))
+    api.add('hypervisor', HypervisorResource(api.log, api.url, eventbus,
+                                             hypervisor_store,
+                                             health_store))
     api.add('procs', ProcResource(api.log, api.url, app_store, proc_store,
                                   proc_factory))
 

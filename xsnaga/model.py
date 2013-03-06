@@ -68,8 +68,6 @@ class Proc(Storm):
     state = Unicode()
     deploy_id = Int()
     deploy = Reference(deploy_id, Deploy.id)
-    host = Unicode()
-    port = Int()
     hypervisor_id = Int()
     hypervisor = Reference(hypervisor_id, 'Hypervisor.id')
     changed_at = DateTime()
@@ -77,9 +75,16 @@ class Proc(Storm):
 
 
 class Hypervisor(Storm):
-    """."""
     __storm_table__ = 'hypervisor'
 
     id = Int(primary=True)
     host = Unicode()
+    port = Int()
+    capacity = Int()
+    options = JSON()
+
     procs = ReferenceSet('Hypervisor.id', Proc.hypervisor_id)
+
+    def proc_url(self):
+        """Return URL to the proc collection."""
+        return 'http://%s:%d/proc' % (self.host, self.port)

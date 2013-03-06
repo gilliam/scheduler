@@ -7,3 +7,4 @@ storm
 requests
 shortuuid
 honcho
+pyee

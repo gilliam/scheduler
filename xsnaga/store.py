@@ -61,6 +61,7 @@ class ProcStore(object):
     @transaction
     def update(self, proc):
         proc.changed_at = _datetime(self.clock.time())
+    persist = update
 
     @transaction
     def set_state(self, proc, state):
@@ -171,10 +172,16 @@ class HypervisorStore(object):
     def __init__(self, store):
         self.store = store
 
+    def by_host(self, host):
+        return self.store.find(Hypervisor, Hypervisor.host == host).one()
+
     @transaction
-    def create(self, host):
+    def create(self, host, port, capacity, options):
         hypervisor = Hypervisor()
         hypervisor.host = host
+        hypervisor.port = port
+        hypervisor.capacity = capacity
+        hypervisor.options = options
         self.store.add(hypervisor)
         return hypervisor
 

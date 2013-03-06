@@ -114,7 +114,9 @@ class ScaleHandler(_BaseHandler):
             scale = app.scale.get(name, 0)
             existing = procs.get(name, [])
             current = [proc for proc in existing
-                       if proc.deploy is app.deploy]
+                       if (proc.deploy is app.deploy)
+                       and (proc.state in ('init', 'boot',
+                                           'running'))]
             self.log.debug('%s: current=%d wanted=%d' % (
                     name, len(current), scale))
             if len(current) > scale:

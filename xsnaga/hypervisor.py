@@ -18,149 +18,206 @@ from urlparse import urljoin
 from requests.exceptions import RequestException
 from glock.task import LoopingCall
 
+from .util import async
 
-class _Hypervisor(object):
 
-    def __init__(self, log, clock, model, interval, proc_store,
-                 requests=requests):
+def _encode_proc_name(proc):
+    return '%s.%s' % (proc.name, proc.proc_id)
+
+
+class APIError(Exception):
+    pass
+
+
+class _HypervisorAPI(object):
+    """Abstraction of the REST API that a hypervisor exposes."""
+
+    def __init__(self, log, http, hypervisor):
+        self.log = log
+        self.http = http
+        self.hypervisor = hypervisor
+
+    def index(self):
+        """Given a hypervisor and something that can do HTTP requests for
+        us try to iterate over all remote procs.
+        """
+        try:
+            page_url = self.hypervisor.proc_url()
+            while page_url is not None:
+                response = self.http.get(page_url)
+                response.raise_for_status()
+                data = response.json()
+                page_url = data.get('_links', {}).get('next')
+                for proc_name, spec in data.iteritems():
+                    if proc_name == '_links':
+                        continue
+                    yield spec
+        except RequestException:
+            self.log.exception("index error")
+            raise APIError()
+
+    def create(self, app, name, image, command, config, callback):
+        try:
+            data = {'app': app, 'name': name, 'image': image,
+                    'command': command, 'config': config,
+                    'callback': callback}
+            response = self.http.post(self.hypervisor.proc_url(),
+                                      data=json.dumps(data))
+            response.raise_for_status()
+            return urljoin(self.hypervisor.proc_url(),
+                           response.headers.get('Location'))
+        except RequestException:
+            self.log.exception("failed to create %s:%s" % (app, name))
+            raise APIError()
+
+    def delete(self, entity):
+        try:
+            response = self.http.delete(entity)
+            response.raise_for_status()
+        except RequestException:
+            self.log.exception("failed to delete proc")
+            raise APIError()
+
+
+class HypervisorClient(object):
+    # We're gonna delete the remote proc resource if it has any of
+    # these states.
+    TERMINATE_STATES = ('stop', 'fail', 'done', 'abort')
+
+    def __init__(self, log, clock, interval, proc_store,
+                 health_store, model, http=requests):
         self.log = log
         self.clock = clock
-        self.model = model
+        self.interval = interval
         self.proc_store = proc_store
+        self.health_store = health_store
+        self.model = model
         self._health_check = LoopingCall(clock, self._check)
-        self._interval = interval
-        self.requests = requests
-        self.base_url = 'http://%s:6000/proc' % (self.model.host,)
+        self._api = _HypervisorAPI(log, http, model)
 
     def start(self):
         """Start interacting with the remote hypervisor."""
-        self._health_check.start(self._interval)
+        self._health_check.start(self.interval)
 
-    def _encode_proc_name(self, proc):
-        # We do not want to have dots in the name (routes issues).
-        # and dash may be used in the app name.
-        return '%s.%s' % (proc.name, proc.proc_id)
+    def spawn_proc(self, proc, callback, command):
+        """Spawn proc on the hypervisor.
 
-    def _check(self):
-        procs = dict([((proc.app.name, self._encode_proc_name(proc)), proc)
-            for proc in self.proc_store.procs_for_hypervisor(self.model)])
-        unwanted_proc = set()
-        seen_proc = set()
+        @param proc: The proc that should be created on the
+            hypervisor.
 
-        uri = 'http://%s:6000/proc' % (self.model.host,)
-        while uri is not None:
-            try:
-                response = self.requests.get(uri)
-                response.raise_for_status()
-            except RequestException, re:
-                self.log.error('could not talk to hypervisor: %r' % (re,))
-                # Just return.  We'll retry in a few anyway.
-                return
+        @param callback: State change callback URL for the proc.
 
-            data = response.json()
-            uri = data.get('_links', {}).get('next')
-            for proc_name, spec in data.iteritems():
-                if proc_name == '_links':
-                    continue
-                proc = procs.get((spec['app'], spec['name']))
-                if proc is None:
-                    unwanted_proc.add(proc_name)
-                elif proc.state in ('stop',):
-                    unwanted_proc.add(proc_name)
-                seen_proc.add(proc_name)
-
-        uri = 'http://%s:6000/proc' % (self.model.host,)
-        for proc_name in unwanted_proc:
-            print "DELET", proc_name, uri
-            self._stop_proc(urljoin(uri, proc_name))
-
-        # For processes that were missing (and that has not state
-        # init), we just remove them straight away.
-
-        # missing_procs = set(procs.keys()) - seen_proc
-        # for proc_name in missing_procs:
-        #     proc = procs[proc_name]
-        #     if proc.state in (u'running', u'boot'):
-        #         self.proc_store.set_state(proc, u'abort')
-
-    def spawn_proc(self, proc, app, callback_url, image, command, config):
-        """Spawn a new process."""
-        self.log.info('spawn new proc(%s, %s): command=%r' % (
-                proc.name, proc.proc_id, command))
+        @param command: The command that should be executed inside the
+            container.
+        """
         try:
-            proc_name = self._encode_proc_name(proc)
-            request = {'app': app.name, 'name': proc_name,
-                       'image': image, 'command': command,
-                       'config': config, 'callback': callback_url}
-            response = self.requests.post(self.base_url,
-                data=json.dumps(request))
-            response.raise_for_status()
-        except RequestException, re:
-            self.log.error('could not talk to hypervisor: %r' % (re,))
-            # Just return.  We'll retry in a few anyway.
-        else:
-            proc.cont_entity = unicode(urljoin(self.base_url,
-                response.headers.get('Location')))
-            print "PROC", proc.cont_entity
-            self.proc_store.update(proc)
-
-    def _stop_proc(self, url):
-        try:
-            response = self.requests.delete(url)
-            response.raise_for_status()
-        except RequestException:
-            self.log.exception(
-                "failed to remove proc %s from hypervisor" % (url,))
-            # FIXME: retry?
+            proc.cont_entity = unicode(self._api.create(
+                proc.app.name, _encode_proc_name(proc), proc.deploy.image,
+                command, proc.deploy.config, callback))
+            self.proc_store.persist(proc)
+        except APIError:
+            # Could not create the proc for some reason.
+            pass
 
     def stop_proc(self, proc):
         """Stop process on remote hypervisor."""
-        print "WOOT", proc
         if proc.cont_entity:
-            self._stop_proc(proc.cont_entity)
+            self._api.delete(proc.cont_entity)
+
+    def _check(self):
+        """Perform check and sync state with hypervisor."""
+        toremove = set()
+        seen = set()
+        try:
+            pmap = self._make_proc_app_name_map()
+            for remote_proc in self._api.index():
+                unwanted = self._check_remote_proc(remote_proc, pmap)
+                if unwanted:
+                    toremove.add(unwanted)
+                else:
+                    seen.add((remote_proc['app'], remote_proc['name']))
+        except APIError:
+            pass
+        else:
+            self._change_state_of_missing_procs(pmap, seen)
+
+            # Only mark the service as "alive" if we did not receive an
+            # exception while processing the collection.
+            self.health_store.mark(self.model.id)
+
+        # If we got any processes we should try to delete do so now.
+        self._terminate_procs(toremove)
+
+    def _change_state_of_missing_procs(self, pmap, seen):
+        missing = set(pmap.keys()) - set(seen)
+        for proc in (pmap[k] for k in missing):
+            self.proc_store.set_state(proc, u'fail')
+        
+    def _check_remote_proc(self, remote_proc, pmap):
+        proc = pmap.get((remote_proc['app'], remote_proc['name']))
+        if proc is not None:
+            self._update_proc_state(proc, remote_proc['state'])
+        if proc is None or proc.state in self.TERMINATE_STATES:
+            return remote_proc['links']['self']
+
+    def _make_proc_app_name_map(self):
+        return dict([((proc.app.name, _encode_proc_name(proc)), proc)
+            for proc in self.proc_store.procs_for_hypervisor(self.model)])
+
+    def _update_proc_state(self, proc, remote_state):
+        """Given the remote state of a proc, see if the proc model
+        state should be updated to reflect the remote state.
+        """
+        if proc.state == 'init' or (proc.state == 'running'
+                                    and remote_state in ('done', 'fail')):
+            self.proc_store.set_state(proc, unicode(remote_state))
+
+    def _terminate_procs(self, entities):
+        for entity in entities:
+            # We do not know if the entity URLs are qualified or just
+            # a path so we join with the base URL of the proc
+            # collection.
+            try:
+                self._api.delete(entity)
+            except APIError:
+                pass
 
 
-class HypervisorService(object):
+class HypervisorController(object):
+    """Controller of hypervisors that acts upon events on the
+    eventbus.
+    """
 
-    def __init__(self, log, clock, store, proc_store, interval=30):
-        self.log = log
-        self.clock = clock
+    def __init__(self, eventbus, store, factory):
+        self.eventbus = eventbus
         self.store = store
-        self.proc_store = proc_store
-        self._hypervisors = {}
-        self.interval = 30
-
-    def hypervisors():
-        return self._hypervisors.itervalues()
+        self.factory = factory
+        self._clients = {}
 
     def start(self):
         for hypervisor in self.store.items:
-            self._start_hypervisor(hypervisor)
+            self._hypervisor_create(hypervisor)
+        # listen for hypervisor events
+        self.eventbus.on('hypervisor-create', async(self._hypervisor_create))
+        self.eventbus.on('hypervisor-dispose', async(self._hypervisor_dispose))
+        # listen for proc events
+        self.eventbus.on('proc-create', async(self._proc_create))
+        self.eventbus.on('proc-dispose', async(self._proc_dispose))
+        
+    def _proc_create(self, proc, callback, command):
+        """Create a proc on a hypervisor."""
+        self._clients.get(proc.hypervisor.id).spawn_proc(
+            proc, callback, command)
 
-    def create(self, *args):
-        model = self.store.create(*args)
-        return self._start_hypervisor(model)
+    def _proc_dispose(self, proc):
+        """Dispose a proc."""
+        self._clients.get(proc.hypervisor.id).stop_proc(proc)
 
-    def remove(self, model):
-        self._stop_hypervisor(model)
-        self.store.remove(model)
+    def _hypervisor_create(self, model):
+        self._clients[model.id] = client = self.factory(model)
+        client.start()
 
-    def get(self, host):
-        model = self.store.by_host(host)
-        return (self._hypervisors.get(model.id)
-                if model is not None else none)
-
-    def _start_hypervisor(self, model):
-        self._hypervisors[model.id] = _hypervisor = _Hypervisor(
-            self.log.getChild(model.host), self.clock, model,
-            self.interval, self.proc_store)
-        _hypervisor.start()
-        return _hypervisor
-
-    def _stop_hypervisor(self, model):
-        _hypervisor = self._hypervisors.pop(model.id, None)
-        if _hypervisor is not None:
-            _hypervisor.stop()
-
-
-
+    def _hypervisor_dispose(self, model):
+        client = self._clients.pop(model.id, None)
+        if client is not None:
+            client.stop()

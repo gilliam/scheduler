@@ -43,39 +43,26 @@ class RandomPlacementPolicy(object):
 class ProcFactory(object):
     """Process factory - spawn and stop procs."""
 
-    def __init__(self, log, clock, proc_store, policy, hypervisor_service,
-                 callback_url):
+    def __init__(self, log, clock, eventbus, proc_store, policy, callback_url):
         self.log = log
         self.clock = clock
+        self.eventbus = eventbus
         self.proc_store = proc_store
         self.policy = policy
-        self.hypervisor_service = hypervisor_service
         self.callback_url = callback_url
 
     def spawn_proc(self, app, deploy, name, command):
         hypervisor = self.policy.allocate(app, name)
-        proc = self.proc_store.create(app, name, deploy,
-                                      shortuuid.uuid(),
+        proc = self.proc_store.create(app, name, deploy, shortuuid.uuid(),
                                       hypervisor)
-        try:
-            controller = self.hypervisor_service.get(hypervisor.host)
-            controller.spawn_proc(proc, app, self.callback_url(proc),
-                                  deploy.image, command, deploy.config)
-        except Exception:
-            self.proc_store.set_state(proc, u'abort')
-            raise
+        self.eventbus.emit('proc-create', proc,
+                           self.callback_url(proc), command)
 
     def stop_proc(self, proc):
         """Stop (but not remove) the given process."""
-        # fixme: check state ...
+        # FIXME: check state ...
         self.proc_store.set_state(proc, u'stop')
-        try:
-            controller = self.hypervisor_service.get(hypervisor.id)
-            controller.stop_proc(proc)
-        except Exception:
-            self.log.error(
-                "failed to remove proc %s from hypervisor" % (proc,))
-            self.proc_store.set_state(proc, u'abort')
+        self.eventbus.emit('proc-dispose', proc)
 
     def kill_proc(self, proc):
         """Remove the proc completely."""
