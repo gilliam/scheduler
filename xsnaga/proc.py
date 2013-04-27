@@ -20,6 +20,10 @@ import shortuuid
 from xsnaga.model import Proc
 
 
+class DeployError(Exception):
+    pass
+
+
 class RandomPlacementPolicy(object):
     """Random placement policy."""
 
@@ -27,15 +31,15 @@ class RandomPlacementPolicy(object):
         self.log = log
         self.store = store
 
-    def allocate(self, app, name):
+    def allocate(self, app, proc_type):
         """Allocate a hypervisor for process C{name} of C{app}."""
         # Here we should do this neat thingy to distribute stuff
         # evenly, and to amke sure that the same process do not run on
         # the same hypervisor.  But for now we only alloc on a random
         # hypervisor.
-        hypervisors = list(self.store.items)
+        hypervisors = list(self.store.all())
         if not hypervisors:
-            raise ValueError()
+            raise DeployError()
         hypervisor = random.choice(hypervisors)
         return hypervisor
 
@@ -51,17 +55,36 @@ class ProcFactory(object):
         self.policy = policy
         self.callback_url = callback_url
 
-    def spawn_proc(self, app, deploy, name, command):
-        hypervisor = self.policy.allocate(app, name)
-        proc = self.proc_store.create(app, name, deploy, shortuuid.uuid(),
+    def spawn_proc(self, app, release, proc_type):
+        """Spawn a process for given app and release.
+
+        @param app: The app that the process belongs to.
+        @type app: a L{App}.
+
+        @param release: The release of the process.
+        @type release: a L{Release}.
+
+        @param proc_type: The process to type create an instance of.
+        @type proc_type: a C{str} or C{unicode}.
+        """
+        assert proc_type in release.pstable
+        command = release.pstable[proc_type]
+        hypervisor = self.policy.allocate(app, proc_type)
+        proc_name = '%s.%s' % (proc_type, shortuuid.uuid())
+        proc = self.proc_store.create(app,
+                                      unicode(proc_type),
+                                      unicode(proc_name),
+                                      u'start',
+                                      release,
                                       hypervisor)
-        self.eventbus.emit('proc-create', proc,
-                           self.callback_url(proc), command)
+        # XXX: If it wasn't for the callback URL we could have moved
+        # the eventbus trigger into the store.
+        self.eventbus.emit('proc-create', proc, app, release,
+                           self.callback_url(app, proc))
 
     def stop_proc(self, proc):
         """Stop (but not remove) the given process."""
-        # FIXME: check state ...
-        self.proc_store.set_state(proc, u'stop')
+        self.proc_store.set_desired_state(proc, u'stop')
         self.eventbus.emit('proc-dispose', proc)
 
     def kill_proc(self, proc):

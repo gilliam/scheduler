@@ -13,8 +13,9 @@
 # limitations under the License.
 
 import datetime
+from storm.expr import SQL, Asc, Desc
 
-from xsnaga.model import Proc, App, Deploy, Hypervisor
+from xsnaga.model import Proc, App, Release, Hypervisor
 
 
 def transaction(f):
@@ -42,70 +43,65 @@ class ProcStore(object):
         self.store = store
 
     @transaction
-    def create(self, app, name, deploy, proc_id, hypervisor):
+    def create(self, app, proc_type, proc_name, desired_state, release, hypervisor):
         p = Proc()
-        p.name = name
         p.app_id = app.id
-        p.deploy = deploy
-        p.proc_id = unicode(proc_id)
-        p.hypervisor = hypervisor
+        p.proc_type = proc_type
+        p.proc_name = proc_name
+        p.desired_state = desired_state
+        p.actual_state = u'unknown'
         p.changed_at = _datetime(self.clock.time())
-        p.state = u'init'
+        p.release_id = release.id
+        p.hypervisor_id = hypervisor.id
         self.store.add(p)
         return p
+
+    @transaction
+    def persist(self, proc):
+        pass
 
     @transaction
     def remove(self, proc):
         self.store.remove(proc)
 
-    @transaction
-    def update(self, proc):
+    def set_desired_state(self, proc, state):
+        proc.desired_state = state
+        self.persist(proc)
+
+    def set_actual_state(self, proc, state):
+        """Set actual state and persist."""
+        proc.actual_state = state
         proc.changed_at = _datetime(self.clock.time())
-    persist = update
+        self.persist(proc)
 
-    @transaction
-    def set_state(self, proc, state):
-        """Set state."""
-        proc.state = state
-        proc.changed_at = _datetime(self.clock.time())
+    def by_app_name(self, app, proc_name):
+        """:"""
+        return self.store.find(Proc, (Proc.app_id == app.id)
+                               & (Proc.proc_name == proc_name)).one()
 
-    def procs_for_app(self, app, proc_name=None):
-        """Return all processes for the given app.
+    def for_release(self, release):
+        """Return all procs for the given release.
 
-        @return: an interator that will get you all the processes.
+        @type release: a L{Release}.
         """
-        if proc_name is None:
-            return self.store.find(Proc, Proc.app_id == app.id)
-        else:
-            return self.store.find(Proc, (Proc.app_id == app.id)
-                                   & (Proc.name == proc_name))
+        return self.store.find(Proc, (Proc.release_id == release.id))
 
-    def by_app_proc_and_id(self, app_name, proc_name, proc_id):
-        return self.store.find(Proc, (Proc.app_id == App.id)
-                               & (App.name == app_name)
-                               & (Proc.name == proc_name)
-                               & (Proc.proc_id == proc_id)).one()
+    def for_app(self, app):
+        """Return all procs for the given app.
 
-    def procs_for_hypervisor(self, hypervisor):
-        """Return all processes for the given hypervisor.
+        @type app: a L{App}.
         """
-        return self.store.find(Proc, Proc.hypervisor_id == hypervisor.id)
+        return self.store.find(Proc, (Proc.app_id == app.id))
 
-    def expired_state_procs(self):
-        """Return all processes that are 'expired'.
+    def for_hypervisor(self, hypervisor):
+        """Return all procs for the given hypervisor.
+
+        @type hypevisor: a L{Hypervisor}.
         """
-        return self.store.find(Proc, (Proc.state == u'abort')
-                                     | (Proc.state == u'fail')
-                                     | (Proc.state == u'done'))
-
-    def expired_deploy_procs(self):
-        """Return all processes that have an outdated deploy."""
-        states = (u'init', u'boot', u'running')
-        return self.store.find(Proc,
-              Proc.state.is_in(states) & (Proc.app_id == App.id)
-              & (App.deploy == Deploy.id) & (Deploy.id != Proc.deploy_id))
+        return self.store.find(Proc, (Proc.hypervisor_id == hypervisor.id))
 
     def all(self):
+        """Return all procs."""
         return self.store.find(Proc)
 
 
@@ -116,23 +112,20 @@ class AppStore(object):
         self.store = store
 
     @transaction
-    def create(self, name, repository, text):
+    def create(self, name, text):
         """Create a new application."""
         app = App()
         app.name = name
-        app.repository = repository
         app.text = text
-        app.scale = {}
         self.store.add(app)
         return app
 
-    @transaction
-    def set_scale(self, app, scale):
-        app.scale = scale
+    def get(self, app_id):
+        return self.store.get(App, app_id)
 
-    def update(self, app):
-        self.store.flush()
-        self.store.commit()
+    @transaction
+    def persist(self, app):
+        pass
 
     def by_name(self, name):
         return self.store.find(App, App.name == name).one()
@@ -142,29 +135,64 @@ class AppStore(object):
         return self.store.find(App)
 
 
-class DeployStore(object):
+class ReleaseStore(object):
 
     def __init__(self, clock, store):
         self.clock = clock
         self.store = store
 
     @transaction
-    def create(self, app, build, image, pstable, config, text):
-        deploy = Deploy()
-        deploy.app_id = app.id
-        deploy.build = build
-        deploy.image = image
-        deploy.pstable = pstable
-        deploy.config = config
-        deploy.text = text
-        deploy.timestamp = datetime.datetime.utcfromtimestamp(self.clock.time())
-        self.store.add(deploy)
-        return deploy
+    def create(self, app, text, build, image, pstable, config):
+        # try to get the next version
+        max_version = self.store.find(Release, (Release.app_id == app.id)).max(Release.version)
+        if max_version is None:
+            max_version = 0
+        release = Release()
+        release.app_id = app.id
+        release.version = max_version + 1
+        release.text = text
+        release.build = build
+        release.image = image
+        release.pstable = pstable
+        release.config = config
+        release.timestamp = _datetime(self.clock.time())
+        self.store.add(release)
+        return release
 
-    def by_id_for_app(self, id, app):
-        """Return a specific deploy."""
-        return self.store.find(Deploy, (Deploy.app_id == app.id) & (
-                Deploy.id == id)).one()
+    @transaction
+    def persist(self, release):
+        """Persist release."""
+        # Normalize the scale.
+        if release.scale is not None:
+            scale = dict(
+                [(proc_type, n)
+                 for (proc_type, n) in release.scale.items()
+                 if n != 0])
+            release.scale = scale or None
+
+    @transaction
+    def remove(self, release):
+        self.store.remove(release)
+
+    def get(self, app_id):
+        return self.store.get(Release, app_id)
+
+    def all(self):
+        return self.store.find(Release)
+
+    def for_app(self, app):
+        """Return an iterable of all releases for a specific app."""
+        return self.store.find(Release, (Release.app_id == app.id)).order_by(
+            Desc(Release.version))
+
+    def with_scale(self):
+        """Return an iterable of all releases that has a scale."""
+        return self.store.find(Release, SQL("releases.scale IS NOT NULL"))
+
+    def by_app_version(self, app, version):
+        """Return a specific release."""
+        return self.store.find(Release, (Release.app_id == app.id) 
+                               & (Release.version == int(version))).one()
 
 
 class HypervisorStore(object):
@@ -185,12 +213,14 @@ class HypervisorStore(object):
         self.store.add(hypervisor)
         return hypervisor
 
+    def get(self, id):
+        return self.store.get(Hypervisor, id)
+
     def by_host(self, host):
         """Return a specific hypervisor by host."""
         return self.store.find(Hypervisor, Hypervisor.host == host).one()
 
-    @property
-    def items(self):
+    def all(self):
         """."""
         return self.store.find(Hypervisor)
 

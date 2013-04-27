@@ -18,19 +18,22 @@ import os
 from storm.locals import Store, create_database
 from gevent import pywsgi, pool
 from glock.clock import Clock
-from xsnaga.store import ProcStore, AppStore, DeployStore, HypervisorStore
+from xsnaga.store import ProcStore, AppStore, ReleaseStore, HypervisorStore
 from xsnaga.hypervisor import HypervisorController, HypervisorClient
-from xsnaga.api import (API, AppResource, DeployResource,
+from xsnaga.api import (API, AppResource, ReleaseResource,
                         HypervisorResource, ProcResource)
-from xsnaga.handler import (OldDeployHandler, ExpiredProcHandler,
-                            ScaleHandler, LostProcHandler)
-from xsnaga.health import HealthStore
+from xsnaga.handler import (SlowBootHandler, ExpiredProcHandler,
+                            ScaleHandler)
 from xsnaga.proc import ProcFactory, RandomPlacementPolicy
 from pyee import EventEmitter
 
 
 HEALTH_THRESHOLD = 2
 HEALTH_CHECK_INTERVAL = 30
+SLOW_BOOT_INTERVAL = 3
+SLOW_BOOT_THRESHOLD = 60
+EXPIRED_INTERVAL = 3
+SCALE_INTERVAL = 5
 
 
 def main():
@@ -42,19 +45,19 @@ def main():
     eventbus = EventEmitter()
     proc_store = ProcStore(clock, store)
     app_store = AppStore(store)
-    deploy_store = DeployStore(clock, store)
+    release_store = ReleaseStore(clock, store)
     hypervisor_store = HypervisorStore(store)
-    health_store = HealthStore(clock, HEALTH_THRESHOLD)
 
     def hypervisor_client_factory(model):
         return HypervisorClient(logging.getLogger(
                 'hypervisor.client[%s]' % (model.host,)),
                 clock, HEALTH_CHECK_INTERVAL, proc_store,
-                health_store, model)
+                app_store, model)
 
     hypervisor_controller = HypervisorController(
         eventbus, hypervisor_store, hypervisor_client_factory)
     hypervisor_controller.start()
+
     policy = RandomPlacementPolicy(logging.getLogger('placement.random'),
                                    hypervisor_store)
     environ = {'SERVER_NAME': options.get('SERVER_NAME', 'localhost'),
@@ -65,24 +68,28 @@ def main():
                                clock, eventbus, proc_store, policy,
                                api.callback_url)
     api.add('apps', AppResource(api.log, api.url, app_store))
-    api.add('deploys', DeployResource(api.log, api.url, app_store,
-                                      deploy_store))
+    api.add('releases', ReleaseResource(api.log, api.url, app_store,
+                                        release_store))
     api.add('hypervisor', HypervisorResource(api.log, api.url, eventbus,
-                                             hypervisor_store,
-                                             health_store))
+                                             hypervisor_store))
     api.add('procs', ProcResource(api.log, api.url, app_store, proc_store,
+                                  release_store, hypervisor_store,
                                   proc_factory))
 
+
     handlers = []
-    handlers.append(OldDeployHandler(logging.getLogger('handler.old-deploy'),
-                                     clock, 3, proc_store, proc_factory))
+    handlers.append(SlowBootHandler(logging.getLogger('handler.slow-boot'),
+                                    clock, SLOW_BOOT_INTERVAL,
+                                    proc_store, app_store,
+                                    SLOW_BOOT_THRESHOLD))
     handlers.append(ExpiredProcHandler(logging.getLogger('handler.expired'),
-                                       clock, 3, proc_store, proc_factory))
+                                       clock, EXPIRED_INTERVAL,
+                                       proc_store, app_store,
+                                       proc_factory))
     handlers.append(ScaleHandler(logging.getLogger('handler.scale'),
-                                 clock, 5, app_store, proc_store, proc_factory,
-                                 pool.Pool(5)))
-    handlers.append(LostProcHandler(logging.getLogger('handler.lost'),
-                                    clock, 7, proc_store, 120))
+                                 clock, SCALE_INTERVAL,
+                                 release_store, app_store, proc_store,
+                                 proc_factory, pool.Pool(5)))
     for handler in handlers:
         handler.start()
     logging.info("Start serving requests on %d" % (int(options['PORT'])))

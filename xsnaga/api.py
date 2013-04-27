@@ -22,54 +22,59 @@ from routes import Mapper, URLGenerator
 def _build_app(url, app):
     """Return a representation of the app."""
     data = {
-        'kind': 'gilliam#app', 'name': app.name,
-        'repository': app.repository, 'text': app.text,
-        '_links': {
+        'kind': 'gilliam#app',
+        'name': app.name,
+        'text': app.text,
+        'links': {
             'self': url('app', app_name=app.name),
             }
         }
-    if app.deploy:
-        data['deploy'] = _build_deploy(url, app, app.deploy)
     return data
 
 
-def _build_deploy(url, app, deploy):
+def _build_release(url, app, release):
     """Return a representation of the deploy."""
     return {
-        'kind': 'gilliam#deploy', 'build': deploy.build,
-        'image': deploy.image, 'pstable': deploy.pstable,
-        'config': deploy.config, 'text': deploy.text,
-        'when': deploy.timestamp.isoformat(' '), 'id': deploy.id,
-        '_links': {
-            'self': url('deploy', app_name=app.name,
-                        deploy_id=deploy.id),
+        'kind': 'gilliam#release',
+        'version': release.version,
+        'text': release.text,
+        'build': release.build,
+        'image': release.image,
+        'pstable': release.pstable,
+        'config': release.config,
+        'scale': release.scale or {},
+        'timestamp': release.timestamp.isoformat(' '),
+        'links': {
+            'self': url('release', app_name=app.name,
+                        version=release.version),
+            'scale': url('scale_release', app_name=app.name,
+                         version=release.version),
             }
         }
 
 
-def _build_hypervisor(url, health, hypervisor):
-    phi = health.phi(hypervisor.id)
+def _build_hypervisor(url, hypervisor):
     return {
         'kind': 'gilliam#hypervisor', 'host': hypervisor.host,
         'port': hypervisor.port,
         'options': hypervisor.options,
         'capacity': hypervisor.capacity,
-        'status': {
-            'phi': phi
-            },
-        '_links': {
+        'links': {
             'self': url('hypervisor', hostname=hypervisor.host)
             }
         }
 
 
-def _build_proc(url, proc):
+def _build_proc(url, app, release, hypervisor, proc):
     return {
-        'kind': 'gilliam#proc', 'id': proc.proc_id,
-        'name': proc.name, 'state': proc.state,
-        'deploy': _build_deploy(url, proc.app, proc.deploy),
-        'host': proc.hypervisor.host,
+        'kind': 'gilliam#proc',
+        'type': proc.proc_type,
+        'name': proc.proc_name,
+        'state': proc.actual_state,
         'changed_at': proc.changed_at.isoformat(' '),
+        'release': _build_release(url, app, release),
+        'host': hypervisor.host,
+        'port': proc.port,
         }
 
 
@@ -101,7 +106,7 @@ def _collection(request, items, url, build, **links):
                             page_size=page_size)
 
     return Response(json={'items': [build(item) for item in items],
-                          '_links': links}, status=200)
+                          'links': links}, status=200)
 
 
 class _BaseResource(object):
@@ -151,9 +156,9 @@ class AppResource(_BaseResource):
         return Response(json=_build_app(self.url, app), status=200)
 
     def create(self, request):
-        data = self._assert_request_content(request, 'name', 'repository')
-        app = self.app_store.create(data['name'], data['repository'],
-                                    data.get('text', data['name']))
+        data = self._assert_request_content(request, 'name')
+        app = self.app_store.create(unicode(data['name']),
+                                    unicode(data.get('text', data['name'])))
         response = Response(json=_build_app(self.url, app), status=201)
         response.headers.add('Location', self.url('app', app_name=app.name))
         return response
@@ -161,10 +166,9 @@ class AppResource(_BaseResource):
     def update(self, request, app_name):
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
-        data = self._assert_request_content(request, 'repository')
-        app.repository = data['repository']
-        app.text = data.get('text', app.name)
-        self.app_store.update(app)
+        data = self._assert_request_content(request)
+        app.text = unicode(data.get('text', app.name))
+        self.app_store.persist(app)
         return Response(json=_build_app(self.url, app), status=200)
 
     def delete(self, request, app_name):
@@ -172,130 +176,142 @@ class AppResource(_BaseResource):
         self._check_not_found(app)
         self.app_store.remove(app)
         return Response(status=204)
-
-    def scale(self, request, app_name):
-        app = self.app_store.by_name(app_name)
-        self._check_not_found(app)
-        return Response(json=app.scale, status=200)
-
-    def set_scale(self, request, app_name):
-        app = self.app_store.by_name(app_name)
-        self._check_not_found(app)
-        data = self._assert_request_content(request)
-        self.app_store.set_scale(app, data)
-        return Response(status=200)
         
 
-class DeployResource(_BaseResource):
-    """The deploy collection that lives under an application."""
+class ReleaseResource(_BaseResource):
 
-    def __init__(self, log, url, app_store, deploy_store):
+    def __init__(self, log, url, app_store, release_store):
         self.log = log
         self.url = url
         self.app_store = app_store
-        self.deploy_store = deploy_store
+        self.release_store = release_store
 
     def index(self, request, app_name):
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
-        return _collection(request, app.deploys,
-                           partial(self.url, 'deploys', app_name=app_name),
-                           partial(_build_deploy, self.url, app),
-                           latest=self.url('deploy', app_name=app_name,
-                                           deploy_id='latest'))
+        releases = self.release_store.for_app(app)
+        return _collection(request, releases,
+                           partial(self.url, 'releases', app_name=app_name),
+                           partial(_build_release, self.url, app))
 
     def create(self, request, app_name):
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
         data = self._assert_request_content(request, 'build', 'image',
                                             'pstable', 'config', 'text')
-        app.deploy = self.deploy_store.create(app, data['build'],
-                                              data['image'], data['pstable'],
-                                              data['config'], data['text'])
-        self.app_store.update(app)
-        response = Response(json=_build_deploy(self.url, app, app.deploy),
+        release = self.release_store.create(app,
+                                            unicode(data['text']),
+                                            unicode(data['build']),
+                                            unicode(data['image']),
+                                            data['pstable'],
+                                            data['config'])
+        response = Response(json=_build_release(self.url, app, release),
                             status=201)
-        response.headers.add('Location', self.url(
-                'deploy', app_name=app.name, deploy_id=app.deploy.id))
+        response.headers.add('Location',
+                             self.url('release', app_name=app.name,
+                                      version=release.version))
         return response
 
-    def show(self, request, app_name, deploy_id):
+    def show(self, request, app_name, version):
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
-        if deploy_id == 'latest':
-            deploy = app.deploy
-        else:
-            deploy = self.deploy_store.by_id_for_app(int(deploy_id), app)
-        self._check_not_found(deploy)
-        return Response(json=_build_deploy(self.url, app, deploy),
+        release = self.release_store.by_app_version(app, version)
+        self._check_not_found(release)
+        return Response(json=_build_release(self.url, app, release),
                         status=200)
 
-    def delete(self, request, app_name, deploy_id):
+    def set_scale(self, request, app_name, version):
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
-        deploy = self.by_id_for_app(int(deploy_id), app)
-        self._check_not_found(deploy)
-        if deploy is app.deploy:
+        release = self.release_store.by_app_version(app, version)
+        self._check_not_found(release)
+        scale = self._assert_request_content(request)
+        if not self._check_valid_scale(release, scale):
             raise HTTPBadRequest()
-        self.deploy_store.remove(deploy)
-        return Response(status=204)
+        release.scale = scale
+        self.release_store.persist(release)
+        return Response(json=_build_release(self.url, app, release),
+                        status=200)
 
-    def latest(self, request, app_name):
+    def _check_valid_scale(self, release, scale):
+        for proc_type in scale:
+            if proc_type not in release.pstable:
+                return False
+        return True
+
+    def delete(self, request, app_name, version):
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
-        return Response(json=_build_deploy(self.url, app, app.deploy), status=200)
+        release = self.release_store.by_app_version(app, version)
+        self._check_not_found(release)
+        self.release_store.remove(release)
+        return Response(status=204)
 
     
 class ProcResource(_BaseResource):
-    """Resource that exposes all procs for a specific app.
+    """Resource that exposes all procs for a specific app."""
 
-    The procs are indexed by name.  To discover proc names, look at
-    the pstable for the current deploy.
-    """
-
-    def __init__(self, log, url, app_store, proc_store, proc_factory):
+    def __init__(self, log, url, app_store, proc_store, release_store,
+                 hypervisor_store, proc_factory):
         self.log = log
         self.url = url
         self.app_store = app_store
         self.proc_store = proc_store
+        self.release_store = release_store
+        self.hypervisor_store = hypervisor_store
         self.proc_factory = proc_factory
 
-    def index(self, request, app_name, proc_name):
+    # we need a specific build function here since we need to
+    # fetch the release.
+    def _build(self, app, proc):
+        release = self.release_store.get(proc.release_id)
+        hypervisor = self.hypervisor_store.get(proc.hypervisor_id)
+        return _build_proc(self.url, app, release, hypervisor, proc)
+
+    def index(self, request, app_name):
         app = self.app_store.by_name(app_name)
         self._check_not_found(app)
-        procs = self.proc_store.procs_for_app(app, proc_name)
-        return _collection(request, procs,
-                           partial(self.url, 'procs', app_name=app_name,
-                                   proc_name=proc_name),
-                           partial(_build_proc, self.url))
+        return _collection(request, self.proc_store.for_app(app),
+                           partial(self.url, 'procs', app_name=app_name),
+                           partial(self._build, app))
 
-    def show(self, request, app_name, proc_name, proc_id):
-        proc = self.proc_store.by_app_proc_and_id(app_name, proc_name, proc_id)
+    def show(self, request, app_name, proc_name):
+        app = self.app_store.by_name(app_name)
+        self._check_not_found(app)
+        proc = self.proc_store.by_app_name(app, proc_name)
         self._check_not_found(proc)
-        return Response(status=200, json=_build_proc(self.url, proc))
+        release = self.release_store.get(proc.release_id)
+        hypervisor = self.hypervisor_store.get(proc.hypervisor_id)
+        return Response(status=200,
+                        json=_build_proc(self.url, app, release, hypervisor,
+                                         proc))
 
-    def delete(self, request, app_name, proc_name, proc_id):
-        proc = self.proc_store.by_app_proc_and_id(app_name, proc_name, proc_id)
+    def delete(self, request, app_name, proc_name):
+        app = self.app_store.by_name(app_name)
+        self._check_not_found(app)
+        proc = self.proc_store.by_app_name(app, proc_name)
         self._check_not_found(proc)
         self.proc_factory.stop_proc(proc)
         return Response(status=204)
 
-    def set_state(self, request, app_name, proc_name, proc_id, format=None):
-        proc = self.proc_store.by_app_proc_and_id(app_name, proc_name, proc_id)
+    def set_state(self, request, app_name, proc_name):
+        app = self.app_store.by_name(app_name)
+        self._check_not_found(app)
+        proc = self.proc_store.by_app_name(app, proc_name)
         if proc is not None:
-            proc.state = unicode(request.params.get('state'))
-            self.proc_store.update(proc)
+            #proc.port = int(request.params.get('port'))
+            self.proc_state.set_actual_state(unicode(request.params.get('state')))
+        return Response(status=204)
 
 
 class HypervisorResource(_BaseResource):
     """Resource controller for our hypervisors."""
 
-    def __init__(self, log, url, eventbus, store, health):
+    def __init__(self, log, url, eventbus, store):
         self.log = log
         self.url = url
         self.eventbus = eventbus
         self.store = store
-        self.health = health
 
     def _get(self, host):
         hypervisor = self.store.by_host(host)
@@ -303,27 +319,26 @@ class HypervisorResource(_BaseResource):
             raise HTTPNotFound()
         return hypervisor
 
-    def index(self):
+    def index(self, request):
         procs = self.proc_store.procs_for_app(app, proc_name)
         return _collection(request, self.store.items,
                            partial(self.url, 'hypervisors'),
-                           partial(_build_hypervisor, self.url,
-                                   self.health))
+                           partial(_build_hypervisor, self.url))
 
     def show(self, request, hostname):
         hypervisor = self._get(hostname)
-        return Response(json=_build_hypervisor(self.url, self.health,
-                                               hypervisor),
+        return Response(json=_build_hypervisor(self.url, hypervisor),
                         status=200)
 
     def create(self, request):
         data = self._assert_request_content(request, 'host', 'port',
                                             'capacity', 'options')
-        hypervisor = self.store.create(data['host'], data['port'],
-                                       data['capacity'], data['options'])
+        hypervisor = self.store.create(unicode(data['host']),
+                                       int(data['port']),
+                                       data['capacity'],
+                                       data['options'])
         self.eventbus.emit('hypervisor-create', hypervisor)
-        return Response(json=_build_hypervisor(self.url, self.health,
-                                               hypervisor),
+        return Response(json=_build_hypervisor(self.url, hypervisor),
                         status=201)
 
 
@@ -342,26 +357,22 @@ class API(object):
             collection_actions=['index', 'create'],
             member_actions=['show', 'update', 'delete'],
             member_prefix='/{app_name}', formatted=False)
-        app_collection.member.link(
-            'scale', 'scale_app', action='scale', formatted=False)
-        app_collection.member.link(
-            'scale', 'scale_app', action='set_scale',
-            method='PUT', formatted=False)
 
-        deploy_collection = self.mapper.collection(
-            "deploys", "deploy",
-            path_prefix='/app/{app_name}/deploy', controller="deploys",
+        release_collection = self.mapper.collection(
+            "releases", "release",
+            path_prefix='/app/{app_name}/release', controller="releases",
             collection_actions=['index', 'create'],
-            member_actions=['show', 'delete'], member_prefix='/{deploy_id}',
+            member_actions=['show', 'delete'], member_prefix='/{version}',
             formatted=False)
-        deploy_collection.link('latest', 'latest_deploy', action='latest',
-            formatted=False)
+        release_collection.member.link(
+            'scale', 'scale_release', action='set_scale',
+            method='PUT', formatted=False)
 
         proc_collection = self.mapper.collection(
             "procs", "proc",
-            path_prefix='/app/{app_name}/proc/{proc_name}',
+            path_prefix='/app/{app_name}/proc',
             controller='procs', collection_actions=['index'],
-            member_actions=['show', 'delete'], member_prefix='/{proc_id}',
+            member_actions=['show', 'delete'], member_prefix='/{proc_name}',
             formatted=False)
         proc_collection.member.link(
             'state', 'set_state', action='set_state',
@@ -377,10 +388,9 @@ class API(object):
     def add(self, name, controller):
         self.controllers[name] = controller
 
-    def callback_url(self, proc):
-        return self.url('set_state', app_name=proc.app.name,
-                        proc_name=proc.name, proc_id=proc.proc_id,
-                        qualified=True)
+    def callback_url(self, app, proc):
+        return self.url('set_state', app_name=app.name,
+                        proc_name=proc.proc_name, qualified=True)
 
     @wsgify
     def __call__(self, request):

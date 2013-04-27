@@ -12,40 +12,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from datetime import datetime
 from storm.locals import (Int, Unicode, Reference, ReferenceSet, JSON,
                           DateTime, Store, Storm)
 
 
-class Deploy(object):
-    """Representation of a deployment."""
-    __storm_table__ = 'deploy'
+class Release(object):
+    """Representation of a release."""
+    __storm_table__ = 'release'
 
     id = Int(primary=True)
     app_id = Int()
+    version = Int()
+    text = Unicode()
     build = Unicode()
     image = Unicode()
     pstable = JSON()
     config = JSON()
-    text = Unicode()
+    scale = JSON()
     timestamp = DateTime()
 
 
 class App(object):
     """
-
-    @ivar deploy: The current deploy.  May be C{None} if there has not
-        been a deploy yet for this application.
     """
     __storm_table__ = 'app'
 
     id = Int(primary=True)
     name = Unicode()
-    deploy_id = Int()
-    deploy = Reference(deploy_id, Deploy.id)
-    deploys = ReferenceSet(id, Deploy.app_id)
-    scale = JSON()
-    repository = Unicode()
     text = Unicode()
 
 
@@ -62,15 +55,14 @@ class Proc(Storm):
 
     id = Int(primary=True)
     app_id = Int()
-    app = Reference(app_id, App.id)
-    proc_id = Unicode()
-    name = Unicode()
-    state = Unicode()
-    deploy_id = Int()
-    deploy = Reference(deploy_id, Deploy.id)
-    hypervisor_id = Int()
-    hypervisor = Reference(hypervisor_id, 'Hypervisor.id')
+    proc_type = Unicode()
+    proc_name = Unicode()
+    desired_state = Unicode()
+    actual_state = Unicode()
     changed_at = DateTime()
+    release_id = Int()
+    hypervisor_id = Int()
+    port = Int()
     cont_entity = Unicode()
 
 
