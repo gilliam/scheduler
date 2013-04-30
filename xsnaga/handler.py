@@ -35,9 +35,10 @@ class _BaseHandler(object):
 
 
 class SlowBootHandler(_BaseHandler):
-    """Handler responsible for making sure that procs that are slow to
-    boot are expired.
+    """Handler responsible for setting a proc's desired state to 'abort'
+    if it does not boot quickly enough.
     """
+
     def __init__(self, log, clock, interval, proc_store, app_store,
                  threshold):
         _BaseHandler.__init__(self, log, clock, interval)
@@ -46,22 +47,50 @@ class SlowBootHandler(_BaseHandler):
         self.threshold = threshold
 
     def _handle(self):
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.utcfromtimestamp(self.clock.time())
         for proc in self.proc_store.all():
+            dt = now - proc.changed_at
             if proc.desired_state == u'start' \
-                    and proc.actual_state != 'running':
-                dt = now - proc.changed_at
-                if util.total_seconds(dt) >= self.threshold:
-                    app = self.app_store.get(proc.app_id)
-                    self.log.info(
-                        'no state change for proc %s:%s in %d seconds -> abort' % (
-                            app.name, proc.proc_name, self.threshold))
-                    self.proc_store.set_desired_state(proc, u'abort')
+                    and proc.actual_state != 'running' \
+                    and util.total_seconds(dt) >= self.threshold:
+                app = self.app_store.get(proc.app_id)
+                self.log.info(
+                    'no state change for proc %s:%s in %d seconds -> abort' % (
+                        app.name, proc.proc_name, self.threshold))
+                self.proc_store.set_desired_state(proc, u'abort')
+
+
+class SlowTermHandler(_BaseHandler):
+    """Handler responsible for setting a proc's desired state to
+    'abort' if it does not shut down quickly enough.
+    """
+
+    def __init__(self, log, clock, interval, proc_store, app_store,
+                 threshold):
+        _BaseHandler.__init__(self, log, clock, interval)
+        self.proc_store = proc_store
+        self.app_store = app_store
+        self.threshold = threshold
+
+    def _handle(self):
+        now = datetime.datetime.utcfromtimestamp(self.clock.time())
+        for proc in self.proc_store.all():
+            dt = now - proc.changed_at
+            if proc.desired_state == u'stop' \
+                    and proc.actual_state not in ('done', 'fail', 'abort') \
+                    and util.total_seconds(dt) >= self.threshold:
+                app = self.app_store.get(proc.app_id)
+                self.log.info(
+                    'no stop for proc %s:%s in %d seconds -> abort' % (
+                        app.name, proc.proc_name, self.threshold))
+                self.proc_store.set_desired_state(proc, u'abort')
 
 
 class ExpiredProcHandler(_BaseHandler):
-    """Responsible for really removing old or aborted processes from
-    the store.
+    """Handler responsible for removing aborted procs.
+
+    A proc can end up with a desired state 'abort' if it has not
+    reacted quickly enough to instructed state changes.
     """
     
     def __init__(self, log, clock, interval, proc_store,
@@ -78,9 +107,23 @@ class ExpiredProcHandler(_BaseHandler):
                 self.log.info("force kill proc %s:%s" % (
                         app.name, proc.proc_name))
                 self.proc_factory.kill_proc(proc)
-            elif proc.actual_state in (u'done', u'fail', u'abort'):
+
+
+class RemoveTerminatedProcHandler(_BaseHandler):
+    """Handler responsible for removing procs that has terminated."""
+    
+    def __init__(self, log, clock, interval, proc_store,
+                 app_store, proc_factory):
+        _BaseHandler.__init__(self, log, clock, interval)
+        self.proc_store = proc_store
+        self.app_store = app_store
+        self.proc_factory = proc_factory
+
+    def _handle(self):
+        for proc in self.proc_store.all():
+            if proc.actual_state in (u'done', u'fail', u'abort'):
                 app = self.app_store.get(proc.app_id)
-                self.log.info("expire proc %s:%s because of state %s" % (
+                self.log.info("remove proc %s:%s because of state %s" % (
                         app.name, proc.proc_name, proc.actual_state))
                 self.proc_factory.kill_proc(proc)
 
@@ -108,7 +151,9 @@ class ScaleHandler(_BaseHandler):
         for proc_type in release.pstable:
             scale = release.scale or {}
             desired = scale.get(proc_type, 0)
-            current = procs.get(proc_type, [])
+            current = [proc for proc in procs.get(proc_type, [])
+                       if proc.desired_state == 'start']
+            #current = procs.get(proc_type, [])
             if len(current) == desired:
                 continue
 

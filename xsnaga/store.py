@@ -66,6 +66,7 @@ class ProcStore(object):
 
     def set_desired_state(self, proc, state):
         proc.desired_state = state
+        proc.changed_at = _datetime(self.clock.time())
         self.persist(proc)
 
     def set_actual_state(self, proc, state):

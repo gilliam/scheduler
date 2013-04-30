@@ -16,14 +16,16 @@ import logging
 import os
 
 from storm.locals import Store, create_database
-from gevent import pywsgi, pool
+from gevent import pywsgi, pool, socket, monkey
+monkey.patch_all(thread=False, time=False)
 from glock.clock import Clock
 from xsnaga.store import ProcStore, AppStore, ReleaseStore, HypervisorStore
 from xsnaga.hypervisor import HypervisorController, HypervisorClient
 from xsnaga.api import (API, AppResource, ReleaseResource,
                         HypervisorResource, ProcResource)
-from xsnaga.handler import (SlowBootHandler, ExpiredProcHandler,
-                            ScaleHandler)
+from xsnaga.handler import (SlowBootHandler, SlowTermHandler,
+                            ExpiredProcHandler, ScaleHandler,
+                            RemoveTerminatedProcHandler)
 from xsnaga.proc import ProcFactory, RandomPlacementPolicy
 from pyee import EventEmitter
 
@@ -32,16 +34,17 @@ HEALTH_THRESHOLD = 2
 HEALTH_CHECK_INTERVAL = 30
 SLOW_BOOT_INTERVAL = 3
 SLOW_BOOT_THRESHOLD = 60
+SLOW_TERM_INTERVAL = 3
+SLOW_TERM_THRESHOLD = 20
 EXPIRED_INTERVAL = 3
 SCALE_INTERVAL = 5
+REMOVE_TERMINATED_INTERVAL = 10
 
 
-def main():
-    options = os.environ
+def main(clock, eventbus, options):
     format = '%(levelname)-8s %(name)s: %(message)s'
     logging.basicConfig(level=logging.DEBUG, format=format)
     store = Store(create_database(options['DATABASE']))
-    clock = Clock()
     eventbus = EventEmitter()
     proc_store = ProcStore(clock, store)
     app_store = AppStore(store)
@@ -51,8 +54,8 @@ def main():
     def hypervisor_client_factory(model):
         return HypervisorClient(logging.getLogger(
                 'hypervisor.client[%s]' % (model.host,)),
-                clock, HEALTH_CHECK_INTERVAL, proc_store,
-                app_store, model)
+                clock, HEALTH_CHECK_INTERVAL,
+                proc_store, app_store, model)
 
     hypervisor_controller = HypervisorController(
         eventbus, hypervisor_store, hypervisor_client_factory)
@@ -60,7 +63,7 @@ def main():
 
     policy = RandomPlacementPolicy(logging.getLogger('placement.random'),
                                    hypervisor_store)
-    environ = {'SERVER_NAME': options.get('SERVER_NAME', 'localhost'),
+    environ = {'SERVER_NAME': options.get('SERVER_NAME', socket.getfqdn()),
                'SERVER_PORT': str(options['PORT'])}
 
     api = API(logging.getLogger('api'), environ)
@@ -81,11 +84,21 @@ def main():
     handlers.append(SlowBootHandler(logging.getLogger('handler.slow-boot'),
                                     clock, SLOW_BOOT_INTERVAL,
                                     proc_store, app_store,
-                                    SLOW_BOOT_THRESHOLD))
+                                    int(options.get('SLOW_BOOT_THRESHOLD',
+                                                    SLOW_BOOT_THRESHOLD))))
+    handlers.append(SlowTermHandler(logging.getLogger('handler.slow-term'),
+                                    clock, SLOW_TERM_INTERVAL,
+                                    proc_store, app_store,
+                                    SLOW_TERM_THRESHOLD))
     handlers.append(ExpiredProcHandler(logging.getLogger('handler.expired'),
                                        clock, EXPIRED_INTERVAL,
                                        proc_store, app_store,
                                        proc_factory))
+    handlers.append(RemoveTerminatedProcHandler(
+            logging.getLogger( 'handler.terminated'), clock, 
+            int(options.get('REMOVE_TERMINATED_INTERVAL',
+                            REMOVE_TERMINATED_INTERVAL)),
+            proc_store, app_store, proc_factory))
     handlers.append(ScaleHandler(logging.getLogger('handler.scale'),
                                  clock, SCALE_INTERVAL,
                                  release_store, app_store, proc_store,
@@ -93,8 +106,8 @@ def main():
     for handler in handlers:
         handler.start()
     logging.info("Start serving requests on %d" % (int(options['PORT'])))
-    pywsgi.WSGIServer(('', int(options['PORT'])), api).serve_forever()
+    return pywsgi.WSGIServer(('', int(options['PORT'])), api)
 
 
 if __name__ == '__main__':
-    main()
+    main(Clock(), EventEmitter(), os.environ).serve_forever()

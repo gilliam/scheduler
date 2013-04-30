@@ -21,10 +21,6 @@ from glock.task import LoopingCall
 from .util import async
 
 
-def _encode_proc_name(proc):
-    return '%s.%s' % (proc.name, proc.proc_id)
-
-
 class APIError(Exception):
     pass
 
@@ -72,7 +68,8 @@ class _HypervisorAPI(object):
 
     def delete(self, entity):
         try:
-            response = self.http.delete(entity)
+            response = self.http.delete(urljoin(
+                self.hypervisor.proc_url(), entity))
             response.raise_for_status()
         except RequestException:
             self.log.exception("failed to delete proc")
@@ -129,7 +126,6 @@ class HypervisorClient(object):
         try:
             pmap = self._make_proc_app_name_map()
             for remote_proc in self._api.index():
-                self._update_proc_state(proc, remote_proc['state'])
                 unwanted = self._check_remote_proc(remote_proc, pmap)
                 if unwanted:
                     toremove.add(unwanted)
@@ -145,6 +141,8 @@ class HypervisorClient(object):
 
     def _check_remote_proc(self, remote_proc, pmap):
         proc = pmap.get((remote_proc['app'], remote_proc['name']))
+        if proc is not None:
+            self._update_proc_state(proc, remote_proc['state'])
         if proc is None or proc.desired_state in (u'stop', u'abort'):
             return remote_proc['links']['self']
 
@@ -165,7 +163,7 @@ class HypervisorClient(object):
         state should be updated to reflect the remote state.
         """
         if proc.actual_state != remote_state:
-            self.proc_store.set_actual_state(remote_state)
+            self.proc_store.set_actual_state(proc, remote_state)
 
     def _terminate_procs(self, entities):
         for entity in entities:

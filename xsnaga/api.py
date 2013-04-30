@@ -112,9 +112,6 @@ def _collection(request, items, url, build, **links):
 class _BaseResource(object):
     """Base resource that do not allow anything."""
 
-    def _method_not_allowed(*args, **kw):
-        return Response(status=405)
-
     def _check_not_found(self, item):
         if item is None:
             raise HTTPNotFound()
@@ -129,12 +126,6 @@ class _BaseResource(object):
             if not field in data:
                 raise HTTPBadRequest()
         return data
-
-    index = _method_not_allowed
-    create = _method_not_allowed
-    update = _method_not_allowed
-    delete = _method_not_allowed
-    show = _method_not_allowed
 
 
 class AppResource(_BaseResource):
@@ -230,8 +221,7 @@ class ReleaseResource(_BaseResource):
             raise HTTPBadRequest()
         release.scale = scale
         self.release_store.persist(release)
-        return Response(json=_build_release(self.url, app, release),
-                        status=200)
+        return Response(status=204)
 
     def _check_valid_scale(self, release, scale):
         for proc_type in scale:
@@ -299,8 +289,10 @@ class ProcResource(_BaseResource):
         self._check_not_found(app)
         proc = self.proc_store.by_app_name(app, proc_name)
         if proc is not None:
-            #proc.port = int(request.params.get('port'))
-            self.proc_state.set_actual_state(unicode(request.params.get('state')))
+            proc.port = int(request.params.get('port'))
+            #self.proc_store.persist(proc)
+            self.proc_store.set_actual_state(
+                proc, unicode(request.params.get('state')))
         return Response(status=204)
 
 

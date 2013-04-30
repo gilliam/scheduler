@@ -8,3 +8,4 @@ requests
 shortuuid
 honcho
 pyee
+nose
