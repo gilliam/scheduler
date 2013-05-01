@@ -170,6 +170,7 @@ class AppResource(_BaseResource):
         
 
 class ReleaseResource(_BaseResource):
+    """Release resource."""
 
     def __init__(self, log, url, app_store, release_store):
         self.log = log

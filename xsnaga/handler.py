@@ -153,7 +153,6 @@ class ScaleHandler(_BaseHandler):
             desired = scale.get(proc_type, 0)
             current = [proc for proc in procs.get(proc_type, [])
                        if proc.desired_state == 'start']
-            #current = procs.get(proc_type, [])
             if len(current) == desired:
                 continue
 
