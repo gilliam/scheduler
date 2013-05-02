@@ -1,5 +1,3 @@
-# The Gilliam Orchestrator
-
 This is the scheduler and API component of Gilliam, a platform for 12
 factor applications.
 
