@@ -313,7 +313,6 @@ class HypervisorResource(_BaseResource):
         return hypervisor
 
     def index(self, request):
-        procs = self.proc_store.procs_for_app(app, proc_name)
         return _collection(request, self.store.items,
                            partial(self.url, 'hypervisors'),
                            partial(_build_hypervisor, self.url))
@@ -344,7 +343,7 @@ class API(object):
         self.url = URLGenerator(self.mapper, environ)
         self.controllers = {}
         
-        app_collection = self.mapper.collection(
+        self.mapper.collection(
             "apps", "app",
             path_prefix='/app', controller="apps",
             collection_actions=['index', 'create'],
@@ -371,7 +370,7 @@ class API(object):
             'state', 'set_state', action='set_state',
             method='POST', formatted=False)
 
-        hypervisor_collection = self.mapper.collection(
+        self.mapper.collection(
             "hypervisors", "hypervisor",
             path_prefix='/hypervisor',
             collection_actions=['index', 'create'],

@@ -14,10 +14,8 @@
 
 """Functionality for managing processes."""
 
-import datetime
 import random
 import shortuuid
-from xsnaga.model import Proc
 
 
 class DeployError(Exception):
@@ -68,7 +66,6 @@ class ProcFactory(object):
         @type proc_type: a C{str} or C{unicode}.
         """
         assert proc_type in release.pstable
-        command = release.pstable[proc_type]
         hypervisor = self.policy.allocate(app, proc_type)
         proc_name = '%s.%s' % (proc_type, shortuuid.uuid())
         proc = self.proc_store.create(app,

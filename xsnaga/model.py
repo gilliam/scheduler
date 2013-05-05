@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from storm.locals import (Int, Unicode, Reference, ReferenceSet, JSON,
-                          DateTime, Store, Storm)
+from storm.locals import (Int, Unicode, JSON,
+                          DateTime, Storm)
 
 
 class Release(object):
@@ -74,8 +74,6 @@ class Hypervisor(Storm):
     port = Int()
     capacity = Int()
     options = JSON()
-
-    procs = ReferenceSet('Hypervisor.id', Proc.hypervisor_id)
 
     def proc_url(self):
         """Return URL to the proc collection."""

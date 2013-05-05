@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import datetime
-from storm.expr import SQL, Asc, Desc
+from storm.expr import SQL, Desc
 
 from xsnaga.model import Proc, App, Release, Hypervisor
 
@@ -200,9 +200,6 @@ class HypervisorStore(object):
 
     def __init__(self, store):
         self.store = store
-
-    def by_host(self, host):
-        return self.store.find(Hypervisor, Hypervisor.host == host).one()
 
     @transaction
     def create(self, host, port, capacity, options):
