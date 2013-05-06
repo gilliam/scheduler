@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
+
 from functools import partial
 from gevent import pywsgi
 from webob.dec import wsgify
@@ -19,10 +21,10 @@ from webob.exc import HTTPBadRequest, HTTPNotFound
 from webob import Response
 from routes import Mapper, URLGenerator
 import pyee
+from requests.exceptions import RequestException, Timeout
 import requests
 import gevent
 import uuid
-import logging
 
 
 class Proc(pyee.EventEmitter):
@@ -134,7 +136,7 @@ class MockHypervisor(object):
                                             params=params,
                                             timeout=10,
                                             stream=False)
-        except requests.Timeout:
+        except Timeout:
             self.log.error("timeout while sending state change to %s" % (
                     callback_url))
         except RequestException:
