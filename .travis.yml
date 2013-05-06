@@ -6,3 +6,5 @@ python:
 install: "pip install -r requirements.txt --use-mirrors"
 # command to run tests
 script: nosetests
+# services
+services: sqlite3
