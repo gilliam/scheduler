@@ -109,5 +109,8 @@ def main(clock, eventbus, options):
     return pywsgi.WSGIServer(('', int(options['PORT'])), api)
 
 
-if __name__ == '__main__':
+def _start():
     main(Clock(), EventEmitter(), os.environ).serve_forever()
+
+if __name__ == '__main__':
+    _start()

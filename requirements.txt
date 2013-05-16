@@ -6,6 +6,6 @@ docopt
 storm
 requests
 shortuuid
-honcho
+git+git://github.com/gilliam/honcho.git
 pyee
 nose

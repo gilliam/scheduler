@@ -1,0 +1,2 @@
+#!/bin/bash
+cd /opt/gilliam/scheduler && sqlite3 -init schema.sql gilliam.db .quit
