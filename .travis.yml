@@ -1,13 +1,27 @@
+--- 
 language: python
-python:
-  - "2.6"
-  - "2.7"
-# install cython before regular install
-before_install:
-  - pip install --use-mirrors Cython
-# command to install dependencies
-install: "pip install -r requirements.txt --use-mirrors"
-# command to run tests
-script: nosetests
-# services
+before_script: 
+- gem install travis-artifacts
+- gem install fpm
+env: 
+  global: 
+    ARTIFACTS_S3_BUCKET: gilliam-artifacts
+  - secure: |-
+      RoBO5jrJNn2M4HIV1qyV7glvRoFtnVdvNvnn5WmZSm/5MhY7wQKnJqnEDsmQ
+      oFZCMZZ2mqlgMXGfW9iv5QHG8sYow0LnABDk5ByayEHm1Qh6ShfQLgk4iITp
+      5J8ld01PWd+XFfRfcDSNLPXPlYQ0PeQl7l66YS7hc2jq8rsIm/s=
+  - secure: |-
+      BNpmtQPpETNA1sG2APMyPv+XsKIySD0zOWJYbm78bDcLTCzU+x5xRTKEP94T
+      cz+ywnomSEt9xAUqsJQntFUPI5q7LJVchatQGXCECpJw7yW4MWWrYsvpTjvH
+      USKyS1llvP4SCXe2uDD+9fNtUD8PMWiaAyMN+HvYbGUXN1rJ2rE=
 services: sqlite3
+before_install: 
+- pip install --use-mirrors Cython
+install: pip install -r requirements.txt --use-mirrors
+after_script: 
+- bash pkg/build-ubuntu-upstart.sh
+- travis-artifacts upload --path *.deb
+python: 
+- "2.6"
+- "2.7"
+script: nosetests
