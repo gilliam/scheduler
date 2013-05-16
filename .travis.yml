@@ -5,7 +5,7 @@ before_script:
 - gem install fpm
 env: 
   global: 
-    ARTIFACTS_S3_BUCKET: gilliam-artifacts
+  - ARTIFACTS_S3_BUCKET: gilliam-artifacts
   - secure: |-
       RoBO5jrJNn2M4HIV1qyV7glvRoFtnVdvNvnn5WmZSm/5MhY7wQKnJqnEDsmQ
       oFZCMZZ2mqlgMXGfW9iv5QHG8sYow0LnABDk5ByayEHm1Qh6ShfQLgk4iITp
@@ -22,6 +22,5 @@ after_script:
 - bash pkg/build-ubuntu-upstart.sh
 - travis-artifacts upload --path *.deb
 python: 
-- "2.6"
 - "2.7"
 script: nosetests
