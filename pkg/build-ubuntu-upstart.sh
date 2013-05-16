@@ -40,6 +40,9 @@ cat gilliam-scheduler-api
 mkdir -p etc/init etc/default
 mv gilliam-scheduler*.conf etc/init/
 mv gilliam-scheduler-api etc/default
+# FIXME(jrydberg): for some reason the default file is empty from time
+# to time. copy over the original.
+cp ${TOPDIR}/.env etc/default/gilliam-scheduler-api
 
 cd ${TOPDIR}
 fpm -s dir -t deb -n gilliam-scheduler -v ${VERSION} -d sqlite3 \
