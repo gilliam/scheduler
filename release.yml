@@ -1,0 +1,9 @@
+api:
+  image: gilliam/schedule
+  command: bin/api
+_worker:
+  image: gilliam/schedule
+  command: bin/worker
+_store:
+  image: gilliam/etcd
+  command: null

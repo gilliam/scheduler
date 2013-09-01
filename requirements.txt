@@ -1,0 +1,8 @@
+shortuuid
+gevent
+requests
+pyee
+python-circuit
+glock
+PyYAML
+git+https://github.com/transitorykris/etcd-py.git

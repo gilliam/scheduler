@@ -1,0 +1,6 @@
+api:
+  command: bin/api
+_worker:
+  command: bin/worker
+_store:
+  type: etcd
