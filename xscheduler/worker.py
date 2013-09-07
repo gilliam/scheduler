@@ -21,13 +21,9 @@ import logging
 
 import etcd
 from gilliam.service_registry import ServiceRegistryClient
-import shortuuid
-import requests
-import yaml
 
 from xscheduler.scheduler import (RequirementRankPlacementPolicy,
-                                  Scheduler, Dispatcher, Updater,
-                                  Terminator)
+                                  Scheduler, Updater, Terminator)
 from xscheduler.executor import ExecutorManager
 from xscheduler import store, util
 
@@ -38,10 +34,11 @@ def _worker(executor_manager, store_query):
 
 
 def main():
-    format = '%(levelname)-8s %(name)s: %(message)s'
+    format = '%(asctime)s %(levelname)-8s %(name)s: %(message)s'
     logging.basicConfig(level=logging.DEBUG, format=format)
 
     formation = os.getenv('GILLIAM_FORMATION')
+    instance = os.getenv('GILLIAM_INSTANCE')
     srnodes = os.getenv('GILLIAM_SERVICE_REGISTRY_NODES')
     check_interval = int(os.getenv('CHECK_INTERVAL', 10))
     
@@ -56,15 +53,14 @@ def main():
     policy = RequirementRankPlacementPolicy()
     services = [
         Scheduler(time, store_query, executor_manager, policy),
-        Dispatcher(time, store_query, executor_manager),
         Updater(time, store_query, executor_manager),
         Terminator(time, store_query, executor_manager)
         ]
 
-    leader_lock = util.Lock(store_client, 'leader', 'bootstrapper')
+    leader_lock = util.Lock(store_client, 'leader', instance)
     with leader_lock:
-        executor_manager.start()
         store_query.start()
+        executor_manager.start()
         for service in services:
             service.start()
         _worker(executor_manager, store_query)

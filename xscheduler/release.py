@@ -21,7 +21,8 @@ from etcd import EtcdError
 
 
 def _is_running(inst):
-    return (inst.state == inst.STATE_RUNNING or
+    return (inst.state == inst.STATE_PEDNING or 
+            inst.state == inst.STATE_RUNNING or
             inst.state == inst.STATE_MIGRATING)
 
 

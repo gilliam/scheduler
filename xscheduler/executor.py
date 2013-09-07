@@ -128,7 +128,6 @@ class _ExecutorController(object):
             self._remember(container.id, container)
 
     def _check_status(self):
-        self._started.set()
         try:
             containers = self.apiclient.containers()
         except Exception:
@@ -140,6 +139,7 @@ class _ExecutorController(object):
             for id, container in containers.items():
                 self._remember(id, container)
             self._update_state()
+        self._started.set()
 
     def _update_state(self):
         for id, container in self._containers.items():
@@ -241,9 +241,9 @@ class ExecutorManager(object):
             self.clock, name, apiclient, self.store_query,
             self.check_interval).start()
 
-    def dispatch(self, inst):
+    def dispatch(self, inst, name):
         """Dispatch C{inst} to C{name}."""
-        self.get(inst.assigned_to).dispatch(inst)
+        self.get(name).dispatch(inst)
 
     def restart(self, inst):
         self.get(inst.assigned_to).restart(inst)
@@ -251,9 +251,9 @@ class ExecutorManager(object):
     def terminate(self, inst):
         self.get(inst.assigned_to).delete(inst)
 
-    def wait(self, instance, timeout=None):
+    def wait(self, instance, name, timeout=None):
         """Wait an instance to boot or to fail."""
-        client = self.get(instance.assigned_to)
+        client = self.get(name)
         with gevent.Timeout(timeout):
             while True:
                 status, = client.statuses([instance])

@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import time
+
 from gevent.event import Event
 import gevent
 
@@ -80,22 +82,25 @@ class Lock(object):
         self._stopped = Event()
 
     def _heartbeat(self):
-        while not self._stopped.is_set():
+        while True:
+            self._stopped.wait(self._ttl / 2)
+            if self._stopped.is_set():
+                break
             self.etcd.testandset(self.key, self.name, self.name,
                                  ttl=self._ttl)
-            self._stopped.wait(self._ttl / 2)
 
     def lock(self):
+        # This is to work around bugs in etcd.  Not very atomic
+        # at all :(
         while True:
             try:
-                self.etcd.testandset(self.key, '', self.name,
-                                     ttl=self._ttl)
-            except EtcdError:
-                time.sleep(self._ttl / 2)
-                continue
-            else:
+                e = self.etcd.get(self.key)
+            except EtcdError, err:
+                e = self.etcd.set(self.key, self.name)
                 self._gthread = gevent.spawn(self._heartbeat)
                 break
+            else:
+                time.sleep(self._ttl / 2)
 
     def unlock(self):
         self._stopped.set()

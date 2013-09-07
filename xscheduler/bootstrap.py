@@ -46,9 +46,9 @@ def _create(store_command, formation, service, release, template):
                           env=template.get('env', {}))
 
 
-def _deploy_instance(executor_manager, inst):
-    executor_manager.dispatch(inst)
-    executor_manager.wait(inst, timeout=120)
+def _deploy_instance(executor_manager, inst, name):
+    executor_manager.dispatch(inst, name)
+    executor_manager.wait(inst, name, timeout=120)
 
 
 def _select_executor(registry_client):
@@ -75,14 +75,14 @@ def _bootstrap0(registry_client, executor_manager, store_client,
 
     insts = {name: _create(store_command, formation, name, '1', release[name])
              for name in release}
-    insts['_store'].assigned_to = _select_executor(registry_client)
-    _deploy_instance(executor_manager, insts['_store'])
+    executor = _select_executor(registry_client)
+    _deploy_instance(executor_manager, insts['_store'], executor)
     # the instance is now up and running, so now we can do a proper
     # "assign".
     store_client.start()
 
-    insts['_store'].assign(insts['_store'].assigned_to)
-    insts['_store'].set_state(store.Instance.STATE_RUNNING)
+    insts['_store'].update(state=store.Instance.STATE_RUNNING,
+                           assigned_to=executor)
 
     # write our release to the store.
     release_store.create(formation, '1', {'name': '1', 'services': release})
@@ -92,9 +92,10 @@ def _bootstrap0(registry_client, executor_manager, store_client,
         _create_formation(store_command, insts.values())
         for name, inst in insts.items():
             if name != '_store':
-                inst.assign(_select_executor(registry_client))
-                _deploy_instance(executor_manager, inst)
-                inst.set_state(store.Instance.STATE_RUNNING)
+                executor = _select_executor(registry_client)
+                _deploy_instance(executor_manager, inst, executor)
+                inst.update(state=store.Instance.STATE_RUNNING,
+                            assigned_to=executor)
 
 
 def main():
@@ -104,7 +105,7 @@ def main():
                       metavar="HOSTS")
     (options, args) = parser.parse_args()
 
-    format = '%(levelname)-8s %(name)s: %(message)s'
+    format = '%(asctime)s %(levelname)-8s %(name)s: %(message)s'
     logging.basicConfig(level=logging.DEBUG, format=format)
 
     formation = os.getenv('GILLIAM_FORMATION')

@@ -47,7 +47,7 @@ class RequirementRankPlacementPolicy(object):
 
     def _collect_vars(self, executor):
         """Collect rank variables."""
-        return {'ncont': len(executor.containers)}
+        return {'ncont': len(executor.containers())}
 
     def _eval_rank(self, rank, vars):
         return eval(rank, vars, {})
@@ -67,35 +67,19 @@ class Scheduler(object):
         self.store_query = store_query
         self.manager = manager
         self.policy = policy
-        self._limiter = TokenBucketRateLimiter(clock, 100, 30)
+        self._limiter = TokenBucketRateLimiter(clock, 10, 30)
         self.start = self._runner.start
         self.stop = self._runner.stop
         
     def _do_schedule(self):
         for instance in self.store_query.unassigned():
-            if not self._schedule_limiter.check():
-                break
-            executor = self.policy.select(self.manager.clients(),
-                                          instance.get('placement', {}))
-            if executor is not None:
-                instance.assign(executor.name)
-
-
-class Dispatcher(object):
-
-    def __init__(self, clock, store_query, manager):
-        self._runner = RecurringTask(3, self._do_dispatch)
-        self.store_query = store_query
-        self.manager = manager
-        self._limiter = TokenBucketRateLimiter(clock, 10, 30)
-        self.start = self._runner.start
-        self.stop = self._runner.stop
-
-    def _do_dispatch(self):
-        for instance in self.store_query.undispatched():
+            print "FOUND UNASSIGNED", instance.name
             if not self._limiter.check():
                 break
-            instance.dispatch(self.manager)
+            executor = self.policy.select(self.manager.clients(),
+                                          instance.placement or {})
+            if executor is not None:
+                instance.dispatch(self.manager, executor)
 
 
 class Updater(object):
@@ -112,14 +96,14 @@ class Updater(object):
         inst_env = inst.env or {}
         cont_env = cont.env or {}
         return (inst.image == cont.image
-                and inst.command == cont.command)
+                and inst.command == cont.command
                 and inst_env == cont_env)
 
     def _do_update(self):
         instances = list(self.store_query.index())
         for instance, container in zip(
                 instances, self.manager.containers(instances)):
-            if contaner is None:
+            if container is None:
                 continue
             if not self._equal_instance_container(instance, container):
                 if not self._limiter.check():

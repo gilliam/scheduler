@@ -30,6 +30,7 @@ class Instance(object):
 
     STATE_PENDING_ASSIGNMENT = 'pending-assignment'
     STATE_PENDING_DISPATCH = 'pending-dispatch'
+    STATE_PENDING = 'pending'
     STATE_DISPATCHED = 'dispatched'
     STATE_RUNNING = 'running'
     STATE_MIGRATING = 'migrating'
@@ -47,22 +48,13 @@ class Instance(object):
         self._update(kwargs)
         self._store_command.update(self)
 
-    def assign(self, executor):
-        """Assign this instance to given executor."""
-        self.update(state=self.STATE_PENDING_DISPATCH,
-                    assigned_to=executor)
-
-    def dispatch(self, manager):
-        manager.dispatch(self)
-        self.update(state=self.STATE_RUNNING)
+    def dispatch(self, manager, name):
+        manager.dispatch(name, self)
+        self.update(state=self.STATE_RUNNING, assigned_to=name)
 
     def restart(self, manager):
         manager.restart(self)
         self.update(state=self.STATE_RUNNING)
-
-    def terminate(self, manager):
-        manager.terminate(self)
-        self.update(state=self.STATE_TERMINATED)
 
     def migrate(self, release, image, command, env):
         self.update(release=release, image=image,
@@ -71,6 +63,10 @@ class Instance(object):
 
     def shutdown(self):
         self.update(state=self.STATE_SHUTTING_DOWN)
+
+    def terminate(self, manager):
+        manager.terminate(self)
+        self.update(state=self.STATE_TERMINATED)
 
     def set_state(self, state):
         self.update(state=state)
@@ -158,7 +154,6 @@ class InstanceStoreQuery(pyee.EventEmitter,_InstanceStoreCommon):
             self._create(json.loads(value))
 
     def _handle_event_SET(self, event):
-        print event
         formation, name = self._split_key(event.key)
         instance = self._get(formation, name)
         if instance is not None:
@@ -179,13 +174,15 @@ class InstanceStoreQuery(pyee.EventEmitter,_InstanceStoreCommon):
     def _do_watch(self):
         index = None
         while not self._stopped.is_set():
+            print "WATCH", index
             event = self.client.watch(self.PREFIX, index=index, timeout=5)
+            print "GOT EVETN", event
             if event is None:
                 continue
             if index is None:
-                index = event.index
-            if event.index > index:
-                index = event.index
+                index = event.index + 1
+            if event.index >= index:
+                index = event.index + 1
             methodname = '_handle_event_%s' % (event.action,)
             getattr(self, methodname)(event)
 
@@ -193,11 +190,8 @@ class InstanceStoreQuery(pyee.EventEmitter,_InstanceStoreCommon):
         """Return an iterator that yields unassigned instances.
         """
         return (inst for inst in self._store.itervalues()
-                if inst.state == 'pending-assignment' or inst.state == None)
-
-    def undispatched(self):
-        return (inst for inst in self._store.itervalues()
-                if inst.state == 'pending-dispatch')
+                if inst.state == Instance.STATE_PENDING
+                or inst.state == None)
 
     def shutting_down(self):
         """All instances with state 'terminating'"""
@@ -210,7 +204,7 @@ class InstanceStoreQuery(pyee.EventEmitter,_InstanceStoreCommon):
     
     def running(self):
         return (inst for inst in self._store.itervalues()
-                if inst.state == 'running')
+                if inst.state == Instance.STATE_RUNNING)
 
     def _create(self, value):
         inst = Instance(self.store_command, **value)
