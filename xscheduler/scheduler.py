@@ -96,3 +96,52 @@ class Dispatcher(object):
             if not self._limiter.check():
                 break
             instance.dispatch(self.manager)
+
+
+class Updater(object):
+
+    def __init__(self, clock, store_query, manager):
+        self._runner = RecurringTask(3, self._do_update)
+        self.store_query = store_query
+        self.manager = manager
+        self._limiter = TokenBucketRateLimiter(clock, 10, 30)
+        self.start = self._runner.start
+        self.stop = self._runner.stop
+
+    def _equal_instance_container(self, inst, cont):
+        inst_env = inst.env or {}
+        cont_env = cont.env or {}
+        return (inst.image == cont.image
+                and inst.command == cont.command)
+                and inst_env == cont_env)
+
+    def _do_update(self):
+        instances = list(self.store_query.index())
+        for instance, container in zip(
+                instances, self.manager.containers(instances)):
+            if contaner is None:
+                continue
+            if not self._equal_instance_container(instance, container):
+                if not self._limiter.check():
+                    break
+                instance.restart(self.manager)
+
+
+class Terminator(object):
+    """Process responsible for moving instances from "shutting down"
+    into "terminated" by killing them off.
+    """
+
+    def __init__(self, clock, store_query, manager):
+        self._runner = RecurringTask(3, self._do_terminate)
+        self.store_query = store_query
+        self.manager = manager
+        self._limiter = TokenBucketRateLimiter(clock, 10, 30)
+        self.start = self._runner.start
+        self.stop = self._runner.stop
+
+    def _do_terminate(self):
+        for instance in self.store_query.shutting_down():
+            if not self._limiter.check():
+                break
+            instance.terminate(self.manager)

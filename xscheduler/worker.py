@@ -26,7 +26,8 @@ import requests
 import yaml
 
 from xscheduler.scheduler import (RequirementRankPlacementPolicy,
-                                  Scheduler, Dispatcher)
+                                  Scheduler, Dispatcher, Updater,
+                                  Terminator)
 from xscheduler.executor import ExecutorManager
 from xscheduler import store, util
 
@@ -52,16 +53,19 @@ def main():
     executor_manager = ExecutorManager(time, registry_client, store_query,
                                        check_interval)
 
-
     policy = RequirementRankPlacementPolicy()
-    scheduler = Scheduler(time, store_query, executor_manager, policy)
-    dispatcher = Dispatcher(time, store_query, executor_manager)
+    services = [
+        Scheduler(time, store_query, executor_manager, policy),
+        Dispatcher(time, store_query, executor_manager),
+        Updater(time, store_query, executor_manager),
+        Terminator(time, store_query, executor_manager)
+        ]
 
     leader_lock = util.Lock(store_client, 'leader', 'bootstrapper')
     with leader_lock:
         executor_manager.start()
         store_query.start()
-        scheduler.start()
-        dispatcher.start()
+        for service in services:
+            service.start()
         _worker(executor_manager, store_query)
 

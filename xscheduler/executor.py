@@ -105,13 +105,13 @@ class _ExecutorController(object):
 
     def statuses(self, instances):
         for instance in instances:
-            container = self._find(instance)
+            container = self.find(instance)
             yield (container.state if container is not None
                    else 'unknown')
 
     def delete(self, instance):
         """Delete instance."""
-        container = self._find(instance)
+        container = self.find(instance)
         if container is not None:
             self._forget(container.id)
             try:
@@ -121,7 +121,7 @@ class _ExecutorController(object):
                 raise
 
     def restart(self, instance):
-        container = self._find(instance)
+        container = self.find(instance)
         if container is not None:
             container = self._handle_error(
                 self.apiclient.restart, container.id, instance)
@@ -195,7 +195,7 @@ class _ExecutorController(object):
                                     container.service,
                                     container.instance)
 
-    def _find(self, inst):
+    def find(self, inst):
         """Lookup container based on instance."""
         for container in self._containers.itervalues():
             if (container.formation == inst.formation
@@ -245,6 +245,12 @@ class ExecutorManager(object):
         """Dispatch C{inst} to C{name}."""
         self.get(inst.assigned_to).dispatch(inst)
 
+    def restart(self, inst):
+        self.get(inst.assigned_to).restart(inst)
+
+    def terminate(self, inst):
+        self.get(inst.assigned_to).delete(inst)
+
     def wait(self, instance, timeout=None):
         """Wait an instance to boot or to fail."""
         client = self.get(instance.assigned_to)
@@ -255,3 +261,11 @@ class ExecutorManager(object):
                     return status
                 self.clock.sleep(5)
 
+    def containers(self, instances):
+        """Return containers for instances."""
+        for instance in instances:
+            if instance.assigned_to is None:
+                yield None
+            else:
+                client = self.get(instance.assigned_to)
+                yield client.find(instance)

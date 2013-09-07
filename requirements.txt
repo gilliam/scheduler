@@ -6,3 +6,5 @@ python-circuit
 glock
 PyYAML
 git+https://github.com/transitorykris/etcd-py.git
+Routes
+WebOb

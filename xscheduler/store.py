@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import json
+from operator import attrgetter
 
 from gevent.event import Event
 import gevent
@@ -24,13 +25,16 @@ class Instance(object):
 
     __attributes__ = (
         'name', 'instance', 'service', 'formation', 'placement',
-        'state', 'assigned_to', 'image', 'command', 'env')
+        'state', 'assigned_to', 'image', 'command', 'env',
+        'release')
 
     STATE_PENDING_ASSIGNMENT = 'pending-assignment'
     STATE_PENDING_DISPATCH = 'pending-dispatch'
     STATE_DISPATCHED = 'dispatched'
     STATE_RUNNING = 'running'
-
+    STATE_MIGRATING = 'migrating'
+    STATE_SHUTTING_DOWN = 'shutting-down'
+    STATE_TERMINTED = 'terminated'
     STATE_LOST = 'lost'
 
     def __init__(self, store_command, **kwargs):
@@ -52,6 +56,22 @@ class Instance(object):
         manager.dispatch(self)
         self.update(state=self.STATE_RUNNING)
 
+    def restart(self, manager):
+        manager.restart(self)
+        self.update(state=self.STATE_RUNNING)
+
+    def terminate(self, manager):
+        manager.terminate(self)
+        self.update(state=self.STATE_TERMINATED)
+
+    def migrate(self, release, image, command, env):
+        self.update(release=release, image=image,
+                    command=command, env=env,
+                    state=self.STATE_MIGRATING)
+
+    def shutdown(self):
+        self.update(state=self.STATE_SHUTTING_DOWN)
+
     def set_state(self, state):
         self.update(state=state)
 
@@ -72,7 +92,7 @@ class Instance(object):
 
 class _InstanceStoreCommon(object):
     FACTORY = Instance
-    PREFIX = 'formation'
+    PREFIX = 'instances'
 
     def _make_key(self, instance):
         return '%s/%s/%s' % (self.PREFIX, instance.formation,
@@ -179,6 +199,15 @@ class InstanceStoreQuery(pyee.EventEmitter,_InstanceStoreCommon):
         return (inst for inst in self._store.itervalues()
                 if inst.state == 'pending-dispatch')
 
+    def shutting_down(self):
+        """All instances with state 'terminating'"""
+        return (inst for inst in self._store.itervalues()
+                if inst.state == inst.STATE_SHUTTING_DOWN)
+
+    def terminated(self):
+        return (inst for inst in self._store.itervalues()
+                if inst.state == inst.STATE_TERMINATED)
+    
     def running(self):
         return (inst for inst in self._store.itervalues()
                 if inst.state == 'running')
@@ -198,6 +227,17 @@ class InstanceStoreQuery(pyee.EventEmitter,_InstanceStoreCommon):
         """Delete the given instance."""
         del self._store[(instance.formation, instance.name)]
         self.emit('delete', instance)
+
+    def index(self):
+        """Return instances that belong to a service."""
+        return self._store.itervalues()
+
+    def query_formation(self, formation):
+        """Return instances for formation."""
+        insts = [inst for inst in self.index()
+                 if inst.formation == formation]
+        insts.sort(key=attrgetter('name'))
+        return insts
 
 
 

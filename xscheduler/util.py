@@ -100,7 +100,10 @@ class Lock(object):
     def unlock(self):
         self._stopped.set()
         self._gthread.join()
-        self.etcd.delete(self.key)
+        try:
+            self.etcd.delete(self.key)
+        except EtcdError:
+            pass
 
     def __enter__(self):
         self.lock()

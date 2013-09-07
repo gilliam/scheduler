@@ -27,7 +27,7 @@ import requests
 import yaml
 
 from xscheduler.executor import ExecutorManager
-from xscheduler import store, util
+from xscheduler import store, util, release
 
 
 
@@ -36,10 +36,10 @@ def _create_formation(store_command, insts):
         store_command.create(**inst.to_json())
 
 
-def _create(store_command, formation, service, template):
+def _create(store_command, formation, service, release, template):
     instance = shortuuid.uuid()
     return store.Instance(store_command, formation=formation, service=service,
-                          name='%s.%s' % (service, instance),
+                          name='%s.%s' % (service, instance), release=release,
                           instance=instance,
                           image=template['image'],
                           command=template.get('command'),
@@ -57,7 +57,7 @@ def _select_executor(registry_client):
 
 
 def _bootstrap0(registry_client, executor_manager, store_client,
-                store_command, formation):
+                store_command, release_store, formation):
     """Bootstrap the scheduler.
 
     The steps (and hops) we need to go through to get this up and
@@ -73,7 +73,7 @@ def _bootstrap0(registry_client, executor_manager, store_client,
     with open(os.path.join(os.path.dirname(__file__), '../release.yml')) as fp:
         release = yaml.load(fp)
 
-    insts = {name: _create(store_command, formation, name, release[name])
+    insts = {name: _create(store_command, formation, name, '1', release[name])
              for name in release}
     insts['_store'].assigned_to = _select_executor(registry_client)
     _deploy_instance(executor_manager, insts['_store'])
@@ -83,6 +83,9 @@ def _bootstrap0(registry_client, executor_manager, store_client,
 
     insts['_store'].assign(insts['_store'].assigned_to)
     insts['_store'].set_state(store.Instance.STATE_RUNNING)
+
+    # write our release to the store.
+    release_store.create(formation, '1', {'name': '1', 'services': release})
 
     leader_lock = util.Lock(store_client, 'leader', 'bootstrapper')
     with leader_lock:
@@ -111,9 +114,11 @@ def main():
     store_command = store.InstanceStoreCommand(store_client)
     store_query = store.InstanceStoreQuery(store_client, store_command)
 
+    release_store = release.ReleaseStore(store_client)
+
     registry_client = ServiceRegistryClient(time, options.srnodes.split(','))
     executor_manager = ExecutorManager(time, registry_client, store_query, 5)
     executor_manager.start()
     _bootstrap0(registry_client, executor_manager, store_client, store_command,
-                formation)
+                release_store, formation)
 
