@@ -35,7 +35,7 @@ class Instance(object):
     STATE_RUNNING = 'running'
     STATE_MIGRATING = 'migrating'
     STATE_SHUTTING_DOWN = 'shutting-down'
-    STATE_TERMINTED = 'terminated'
+    STATE_TERMINATED = 'terminated'
     STATE_LOST = 'lost'
 
     def __init__(self, store_command, **kwargs):
