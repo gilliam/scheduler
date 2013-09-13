@@ -16,6 +16,7 @@ from gevent.event import Event
 import gevent
 import requests
 import json
+import logging
 
 from glock.task import LoopingCall
 
@@ -38,7 +39,8 @@ class _APIClient(object):
         return {
             'image': instance.image, 'command': instance.command,
             'formation': instance.formation, 'service': instance.service,
-            'instance': instance.instance, 'env': {}
+            'instance': instance.instance, 'env': instance.env or {},
+            'ports': instance.ports or []
             }
 
     # methods for talking to the executor via the API.  break out
@@ -243,6 +245,7 @@ class ExecutorManager(object):
 
     def dispatch(self, inst, name):
         """Dispatch C{inst} to C{name}."""
+        logging.info("DISPATCH %r to %s: %r" % (inst, name, self._client))
         self.get(name).dispatch(inst)
 
     def restart(self, inst):

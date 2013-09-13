@@ -43,7 +43,8 @@ def _create(store_command, formation, service, release, template):
                           instance=instance,
                           image=template['image'],
                           command=template.get('command'),
-                          env=template.get('env', {}))
+                          env=template.get('env', {}),
+                          ports=template.get('ports', []))
 
 
 def _deploy_instance(executor_manager, inst, name):

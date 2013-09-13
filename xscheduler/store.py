@@ -26,7 +26,7 @@ class Instance(object):
     __attributes__ = (
         'name', 'instance', 'service', 'formation', 'placement',
         'state', 'assigned_to', 'image', 'command', 'env',
-        'release')
+        'release', 'ports')
 
     STATE_PENDING_ASSIGNMENT = 'pending-assignment'
     STATE_PENDING_DISPATCH = 'pending-dispatch'
@@ -49,7 +49,7 @@ class Instance(object):
         self._store_command.update(self)
 
     def dispatch(self, manager, name):
-        manager.dispatch(name, self)
+        manager.dispatch(self, name)
         self.update(state=self.STATE_RUNNING, assigned_to=name)
 
     def restart(self, manager):
@@ -150,7 +150,6 @@ class InstanceStoreQuery(pyee.EventEmitter,_InstanceStoreCommon):
     def _get_all_instances(self):
         keys_values = self.client.get_recursive(self.PREFIX)
         for value in keys_values.itervalues():
-            print keys_values, repr(value)
             self._create(json.loads(value))
 
     def _handle_event_SET(self, event):
@@ -163,6 +162,7 @@ class InstanceStoreQuery(pyee.EventEmitter,_InstanceStoreCommon):
                 return
             self._update(instance, value)
         else:
+            value = json.loads(event.value)
             self._create(value)
 
     def _handle_event_DELETE(self, event):
@@ -174,9 +174,7 @@ class InstanceStoreQuery(pyee.EventEmitter,_InstanceStoreCommon):
     def _do_watch(self):
         index = None
         while not self._stopped.is_set():
-            print "WATCH", index
             event = self.client.watch(self.PREFIX, index=index, timeout=5)
-            print "GOT EVETN", event
             if event is None:
                 continue
             if index is None:
@@ -232,6 +230,3 @@ class InstanceStoreQuery(pyee.EventEmitter,_InstanceStoreCommon):
                  if inst.formation == formation]
         insts.sort(key=attrgetter('name'))
         return insts
-
-
-

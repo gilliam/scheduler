@@ -27,7 +27,7 @@ class RequirementRankPlacementPolicy(object):
         e = self._rank_executors(
                 self._filter_out_executors_that_do_not_match_requirements(
                     executors, options), options)
-        return next(e, None)
+        return next(iter(e), None)
 
     def _eval_requirement(self, requirement, executor):
         vars = {'tags': executor.tags, 'host': executor.host,
@@ -79,7 +79,7 @@ class Scheduler(object):
             executor = self.policy.select(self.manager.clients(),
                                           instance.placement or {})
             if executor is not None:
-                instance.dispatch(self.manager, executor)
+                instance.dispatch(self.manager, executor.name)
 
 
 class Updater(object):

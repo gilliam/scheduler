@@ -43,14 +43,17 @@ class Release(object):
         template = self.services[service]
         instance = shortuuid.uuid()
         # FIXME: move this to a factory function
-        return store.Instance(self.store_command,
-                              formation=self.formation,
-                              service=service,
-                              name='%s.%s' % (service, instance),
-                              instance=instance,
-                              image=template['image'],
-                              command=template.get('command'),
-                              env=template.get('env', {}))
+        self.store_command.create(
+            formation=self.formation,
+            service=service,
+            instance=instance,
+            name='%s.%s' % (service, instance),
+            release=self.name,
+            state=store.Instance.STATE_PENDING,
+            image=template['image'],
+            command=template.get('command'),
+            env=template.get('env', {}),
+            ports=template.get('ports', []))
 
     def scale(self, scales):
         """Scale this release.
@@ -58,19 +61,22 @@ class Release(object):
         Return true if there might be more to do to meet the scale.
         """
         insts = [inst for inst in self.store_query.index()
-                 if inst.formation == self.formation and _is_running(inst)]
+                 if inst.formation == self.formation
+                 and inst.release == self.name
+                 and _is_running(inst)]
         per_service = defaultdict(list)
         for inst in insts:
             per_service[inst.service].append(inst)
-        for name, insts in per_service.items():
-            scale = scales.get(name)
-            if scale is None:
-                continue
+        print "PER SERVICE", per_service
+        print "SCALES"
+        for name, scale in scales.items():
+            insts = per_service.get(name, [])
             if len(insts) > scale:
                 random.choice(insts).shutdown()
                 return True
             elif len(insts) < scale:
                 # we need to create an instance
+                print "CREATE ON", name
                 self._create(name)
                 return True
 
