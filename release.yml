@@ -1,9 +1,11 @@
 api:
   image: gilliam/scheduler
   command: bin/api
+  ports: [80]
 _worker:
   image: gilliam/scheduler
   command: bin/worker
 _store:
   image: gilliam/etcd
   command: null
+  ports: [4001, 7001]
