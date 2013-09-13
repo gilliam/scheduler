@@ -1,6 +1,8 @@
 api:
-  command: bin/api
+  script: bin/api
+  ports:
+    - 80
 _worker:
-  command: bin/worker
+  script: bin/worker
 _store:
   type: etcd
