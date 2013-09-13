@@ -23,11 +23,11 @@ import logging
 import etcd
 from gilliam.service_registry import ServiceRegistryClient
 import shortuuid
-import requests
 import yaml
 
 from xscheduler.executor import ExecutorManager
-from xscheduler import store, util, release
+from xscheduler.release import ReleaseStore
+from xscheduler import store, util
 
 
 
@@ -100,9 +100,9 @@ def _bootstrap0(registry_client, executor_manager, store_client,
 
 def main():
     parser = OptionParser()
-    parser.add_option("-s", "--service-registry", dest="srnodes",
-                      default='', help="service registry nodes",
-                      metavar="HOSTS")
+    parser.add_option("-s", "--service-registry", dest="service_registry",
+                      default=os.getenv('GILLIAM_SERVICE_REGISTRY_NODES', ''),
+                      help="service registry nodes", metavar="HOSTS")
     (options, args) = parser.parse_args()
 
     format = '%(asctime)s %(levelname)-8s %(name)s: %(message)s'
@@ -115,9 +115,9 @@ def main():
     store_command = store.InstanceStoreCommand(store_client)
     store_query = store.InstanceStoreQuery(store_client, store_command)
 
-    release_store = release.ReleaseStore(store_client)
+    release_store = ReleaseStore(store_client)
 
-    registry_client = ServiceRegistryClient(time, options.srnodes.split(','))
+    registry_client = ServiceRegistryClient(time, options.service_registry.split(','))
     executor_manager = ExecutorManager(time, registry_client, store_query, 5)
     executor_manager.start()
     _bootstrap0(registry_client, executor_manager, store_client, store_command,

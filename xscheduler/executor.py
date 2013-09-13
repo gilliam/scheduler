@@ -224,8 +224,8 @@ class ExecutorManager(object):
     def start(self):
         """Start manager."""
         self._form_cache = self.registry.formation_cache('executor')
-        for name in self._form_cache.query():
-            self._create(name)
+        for name, data in self._form_cache.query().items():
+            self._create(data['instance'])
         # FIXME: make sure that we re-populate with new entries.
 
     def get(self, name):

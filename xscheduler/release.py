@@ -14,14 +14,16 @@
 
 from collections import defaultdict
 import json
+import random
 
 import shortuuid
 
 from etcd import EtcdError
 
+from . import store
 
 def _is_running(inst):
-    return (inst.state == inst.STATE_PEDNING or 
+    return (inst.state == inst.STATE_PENDING or 
             inst.state == inst.STATE_RUNNING or
             inst.state == inst.STATE_MIGRATING)
 
@@ -40,7 +42,9 @@ class Release(object):
         """Create an instance of service."""
         template = self.services[service]
         instance = shortuuid.uuid()
-        return store.Instance(store_command, formation=formation,
+        # FIXME: move this to a factory function
+        return store.Instance(self.store_command,
+                              formation=self.formation,
                               service=service,
                               name='%s.%s' % (service, instance),
                               instance=instance,
@@ -54,7 +58,7 @@ class Release(object):
         Return true if there might be more to do to meet the scale.
         """
         insts = [inst for inst in self.store_query.index()
-                 if inst.formation == formation and _is_running(inst)]
+                 if inst.formation == self.formation and _is_running(inst)]
         per_service = defaultdict(list)
         for inst in insts:
             per_service[inst.service].append(inst)
@@ -67,7 +71,7 @@ class Release(object):
                 return True
             elif len(insts) < scale:
                 # we need to create an instance
-                self._create(service)
+                self._create(name)
                 return True
 
     def migrate(self):
@@ -76,17 +80,17 @@ class Release(object):
         Returns true if there might be more instances to migrate.
         """
         insts = [inst for inst in self.store_query.index()
-                 if inst.formation == formation and _is_running(inst)]
+                 if inst.formation == self.formation and _is_running(inst)]
         for inst in insts:
-            service = services.get(inst.service)
+            service = self.services.get(inst.service)
             if service is None:
                 # this service do not exist in the new release.
                 # shut it down!
                 inst.shutdown()
                 return True
-            elif inst.release != release:
+            elif inst.release != self.name:
                 # we need to migrate this to the new release.
-                inst.migrate(release, service['image'],
+                inst.migrate(self.name, service['image'],
                              service['command'],
                              service.get('env', {}))
                 return True

@@ -19,16 +19,15 @@ import logging
 import json
 from optparse import OptionParser
 import os
-import time
 
 import etcd
 from functools import partial
 from gevent import pywsgi
 from routes import Mapper, URLGenerator
-import shortuuid
 from webob.dec import wsgify
 from webob.exc import HTTPNotFound, HTTPBadRequest
 from webob import Response
+from etcd import EtcdError
 
 from xscheduler import store
 from xscheduler.release import ReleaseStore, Release
@@ -136,7 +135,7 @@ class FormationResource(_BaseResource):
         data.update({'kind': 'gilliam#formation'})
         return data
 
-    def index(self):
+    def index(self, request):
         items = self.app_store.apps()
         return _collection(request, items, self.curl, self._build)
 
@@ -148,13 +147,13 @@ class FormationResource(_BaseResource):
     def create(self, request):
         params = self._assert_request_content(request, 'name')
         self.app_store.create(params['name'], params)
-        response = Response(json=self._build(data), status=201)
+        response = Response(json=self._build(params), status=201)
         response.headers.add('Location', 
                              self.url(formation=params['name']))
         return response
 
     def delete(self, request, formation):
-        data = self.store.get(name)
+        data = self.store.get(formation)
         self._check_not_found(data)
         self.app_store.remove(formation)
         return Response(status=204)
@@ -178,7 +177,7 @@ class ReleaseResource(_BaseResource):
 
     def _build(self, data):
         data = data.copy()
-        data.update({'kind': 'gilliam#formation'})
+        data.update({'kind': 'gilliam#release'})
         return data
 
     def show(self, request, formation, name):
@@ -187,11 +186,11 @@ class ReleaseResource(_BaseResource):
         return Response(json=self._build(data), status=200)
 
     def create(self, request, formation):
-        params = self._assert_request_content(request, 'name', 'services')
-        self.store.create(formation, name, params['name'])
+        data = self._assert_request_content(request, 'name', 'services')
+        self.store.create(formation, data['name'], data)
         response = Response(json=self._build(data), status=201)
         response.headers.add('Location', self.url(formation=formation,
-                                                  name=params['name']))
+                                                  name=data['name']))
         return response
 
     def delete(self, request, formation, name):
@@ -209,7 +208,7 @@ class ReleaseResource(_BaseResource):
         return Response(json=more or False, status=200)
 
     def migrate(self, request, formation, name):
-        params = self._assert_request_content(request)
+        #params = self._assert_request_content(request)
         data = self.store.get(formation, name)
         self._check_not_found(data)
         release = self.factory(formation, name, data['services'])
@@ -233,7 +232,6 @@ class InstanceResource(_BaseResource):
         return data
 
     def index(self, request, formation):
-        insts = self.store.query_formation(formation)
         return _collection(request, self.store.query_formation(formation),
                            partial(self.curl, formation=formation),
                            self._build)
