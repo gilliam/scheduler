@@ -15,6 +15,7 @@
 from collections import defaultdict
 import json
 import random
+import itertools
 
 import shortuuid
 
@@ -55,6 +56,22 @@ class Release(object):
             env=template.get('env', {}),
             ports=template.get('ports', []))
 
+    def _collect(self, release=None):
+        return [inst for inst in self.store_query.index()
+                if inst.formation == self.formation
+                and (release is None or release == inst.release)
+                and _is_running(inst)]
+
+    def _group(self, insts):
+        kfn = lambda inst: inst.service
+        return itertools.groupby(sorted(insts, key=kfn), kfn)
+
+    def _collect_instances_per_service(self, insts):
+        per_service = defaultdict(list)
+        for inst in insts:
+            per_service[inst.service].append(inst)
+        return per_service
+
     def scale(self, scales):
         """Scale this release.
 
@@ -80,26 +97,48 @@ class Release(object):
                 self._create(name)
                 return True
 
-    def migrate(self):
+    def migrate(self, from_name=None):
         """Migrate existing instances to the given release.
 
         Returns true if there might be more instances to migrate.
         """
-        insts = [inst for inst in self.store_query.index()
-                 if inst.formation == self.formation and _is_running(inst)]
-        for inst in insts:
-            service = self.services.get(inst.service)
-            if service is None:
-                # this service do not exist in the new release.
-                # shut it down!
-                inst.shutdown()
-                return True
-            elif inst.release != self.name:
-                # we need to migrate this to the new release.
-                inst.migrate(self.name, service['image'],
-                             service['command'],
-                             service.get('env', {}))
-                return True
+        inst_map = dict(self._group(self._collect(from_name)))
+        return self._migrate_to_release(inst_map)
+
+    def _compare_instance_to_service(self, inst, service):
+        inst_env = inst.env or {}
+        serv_env = service['env'] or {}
+        inst_ports = inst.ports or []
+        serv_ports = service['ports'] or []
+        return (inst.image == service['image']
+                and inst.command == service['command']
+                and inst_env == serv_env
+                and inst_ports == serv_ports)
+
+    def _migrate_to_release(self, inst_map):
+        for name in reversed(self._build_order()):
+            service = self.services[name]
+            for inst in inst_map.get(name, []):
+                if inst.release != self.name:
+                    if self._compare_instance_to_service(inst, service):
+                        inst.rerelease(self.name)
+                    else:
+                        inst.migrate(self.name, service['image'],
+                                     service['command'],
+                                     service.get('env', {}),
+                                     service.get('ports', []))
+                    return True
+
+    def _build_order(self):
+        order = self.services.keys()
+        for name, defn in self.services.items():
+            requires = defn.get('requires', [])
+            for require in requires:
+                idx = order.index(require)
+                if idx < order.index(name):
+                    order.remove(name)
+                    order.insert(idx, name)
+        return order
 
 
 class ReleaseStore(object):

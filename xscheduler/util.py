@@ -20,6 +20,10 @@ import gevent
 from etcd import EtcdError
 
 
+def first(it, default):
+    return next(iter(it), default)
+
+
 class TokenBucketRateLimiter(object):
 
     def __init__(self, clock, rate, time):

@@ -56,9 +56,12 @@ class Instance(object):
         manager.restart(self)
         self.update(state=self.STATE_RUNNING)
 
-    def migrate(self, release, image, command, env):
+    def rerelease(self, release):
+        self.update(release=release)
+
+    def migrate(self, release, image, command, env, ports):
         self.update(release=release, image=image,
-                    command=command, env=env,
+                    command=command, env=env, ports=ports,
                     state=self.STATE_MIGRATING)
 
     def shutdown(self):

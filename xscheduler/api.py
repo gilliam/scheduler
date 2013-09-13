@@ -208,11 +208,11 @@ class ReleaseResource(_BaseResource):
         return Response(json=more or False, status=200)
 
     def migrate(self, request, formation, name):
-        #params = self._assert_request_content(request)
+        params = self._assert_request_content(request)
         data = self.store.get(formation, name)
         self._check_not_found(data)
         release = self.factory(formation, name, data['services'])
-        more = release.migrate()
+        more = release.migrate(params.get('from'))
         return Response(json=more or False, status=200)
 
 

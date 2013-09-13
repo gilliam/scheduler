@@ -73,13 +73,15 @@ class Scheduler(object):
         
     def _do_schedule(self):
         for instance in self.store_query.unassigned():
-            print "FOUND UNASSIGNED", instance.name
             if not self._limiter.check():
                 break
-            executor = self.policy.select(self.manager.clients(),
-                                          instance.placement or {})
-            if executor is not None:
-                instance.dispatch(self.manager, executor.name)
+            if instance.assigned_to:
+                instance.dispatch(self.manager, instance.assigned_to)
+            else:
+                executor = self.policy.select(self.manager.clients(),
+                                              instance.placement or {})
+                if executor is not None:
+                    instance.dispatch(self.manager, executor.name)
 
 
 class Updater(object):
@@ -95,9 +97,12 @@ class Updater(object):
     def _equal_instance_container(self, inst, cont):
         inst_env = inst.env or {}
         cont_env = cont.env or {}
+        inst_ports = inst.ports or []
+        cont_ports = cont.ports or []
         return (inst.image == cont.image
                 and inst.command == cont.command
-                and inst_env == cont_env)
+                and inst_env == cont_env
+                and inst_ports == cont_ports)
 
     def _do_update(self):
         instances = list(self.store_query.index())

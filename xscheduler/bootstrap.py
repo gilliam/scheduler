@@ -57,6 +57,9 @@ def _select_executor(registry_client):
     return data['instance']
 
 
+_INITIAL_RELEASE_NAME = '1'
+
+
 def _bootstrap0(registry_client, executor_manager, store_client,
                 store_command, release_store, formation):
     """Bootstrap the scheduler.
@@ -73,9 +76,12 @@ def _bootstrap0(registry_client, executor_manager, store_client,
     """
     with open(os.path.join(os.path.dirname(__file__), '../release.yml')) as fp:
         release = yaml.load(fp)
+        release['name'] = _INITIAL_RELEASE_NAME
 
-    insts = {name: _create(store_command, formation, name, '1', release[name])
-             for name in release}
+    services = release['services']
+    insts = {name: _create(store_command, formation, name,
+                           _INITIAL_RELEASE_NAME, services[name])
+             for name in services}
     executor = _select_executor(registry_client)
     _deploy_instance(executor_manager, insts['_store'], executor)
     # the instance is now up and running, so now we can do a proper
@@ -86,7 +92,7 @@ def _bootstrap0(registry_client, executor_manager, store_client,
                            assigned_to=executor)
 
     # write our release to the store.
-    release_store.create(formation, '1', {'name': '1', 'services': release})
+    release_store.create(formation, _INITIAL_RELEASE_NAME, release)
 
     leader_lock = util.Lock(store_client, 'leader', 'bootstrapper')
     with leader_lock:
