@@ -18,6 +18,12 @@ _DEFAULT_RANK = '-ncont'
 from xscheduler.util import RecurringTask, TokenBucketRateLimiter
 
 
+def _is_running(inst):
+    return (inst.state == inst.STATE_PENDING or 
+            inst.state == inst.STATE_RUNNING or
+            inst.state == inst.STATE_MIGRATING)
+
+
 class RequirementRankPlacementPolicy(object):
 
     def select(self, executors, options):
@@ -109,6 +115,8 @@ class Updater(object):
         for instance, container in zip(
                 instances, self.manager.containers(instances)):
             if container is None:
+                continue
+            if not _is_running(instance):
                 continue
             if not self._equal_instance_container(instance, container):
                 if not self._limiter.check():
