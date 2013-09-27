@@ -27,13 +27,15 @@ class _Container(dict):
 
 class _APIClient(object):
 
-    def __init__(self, httpclient, name):
+    def __init__(self, httpclient, name, formation):
         self.httpclient = httpclient
         self.name = name
+        self.formation = formation
 
     @property
     def _url(self):
-        return 'http://%s.api.executor.service:9000' % (self.name,)
+        return 'http://%s.api.%s.service:9000' % (self.name,
+                                                  self.formation)
 
     def _build_container_request(self, instance):
         return {
@@ -215,17 +217,19 @@ class _ExecutorController(object):
 
 class ExecutorManager(object):
 
-    def __init__(self, clock, registry, store_query, interval):
+    def __init__(self, clock, registry, store_query, interval,
+                 formation='executor'):
         self.clock = clock
         self.registry = registry
         self.store_query = store_query
         self.check_interval = interval
+        self.formation = formation
         self._form_cache = None
         self._client = {}
 
     def start(self):
         """Start manager."""
-        self._form_cache = self.registry.formation_cache('executor')
+        self._form_cache = self.registry.formation_cache(self.formation)
         for name, data in self._form_cache.query().items():
             self._create(data['instance'])
         # FIXME: make sure that we re-populate with new entries.
@@ -238,7 +242,7 @@ class ExecutorManager(object):
 
     def _create(self, name):
         """Create ..."""
-        apiclient = _APIClient(requests.Session(), name)
+        apiclient = _APIClient(requests.Session(), name, self.formation)
         self._client[name] = _ExecutorController(
             self.clock, name, apiclient, self.store_query,
             self.check_interval).start()

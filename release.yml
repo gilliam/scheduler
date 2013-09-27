@@ -1,11 +1,26 @@
-api:
-  image: gilliam/scheduler
-  command: bin/api
-  ports: [80]
-_worker:
-  image: gilliam/scheduler
-  command: bin/worker
-_store:
-  image: gilliam/etcd
-  command: null
-  ports: [4001, 7001]
+author: jrydberg
+kind: gilliam#release
+message: null
+name: '6'
+services:
+  _store:
+    command: null
+    env: {}
+    image: gilliam/etcd
+    options: {}
+    ports:
+    - 4001
+    - 7001
+  _worker:
+    command: bin/worker
+    env: {}
+    image: gilliam/scheduler-_worker:8e5da57a9920b2b9c8ee9888808bb0da
+    options: {}
+    ports: []
+  api:
+    command: bin/api
+    env: {}
+    image: gilliam/scheduler-api:8e5da57a9920b2b9c8ee9888808bb0da
+    options: {}
+    ports:
+    - 80

@@ -18,6 +18,26 @@ from operator import attrgetter
 from gevent.event import Event
 import gevent
 import pyee
+import shortuuid
+
+
+def create(store_command, formation, service, release,
+           image, command, env=None, ports=None,
+           assigned_to=None, placement=None):
+    instance = shortuuid.uuid()
+    return store_command.create(
+            formation=formation,
+            service=service,
+            instance=instance,
+            name='%s.%s' % (service, instance),
+            release=release,
+            state=Instance.STATE_PENDING,
+            placement=placement,
+            assigned_to=assigned_to,
+            image=image,
+            command=command,
+            env=env,
+            ports=ports)
 
 
 class Instance(object):
@@ -87,6 +107,11 @@ class Instance(object):
         for attr in self.__attributes__:
             if attr in kwargs:
                 setattr(self, attr, kwargs[attr])
+
+    def __repr__(self):
+        return '<Instance name=%s release=%s>' % (
+            self.name, self.release)
+    __str__ = __repr__
 
 
 class _InstanceStoreCommon(object):

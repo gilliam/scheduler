@@ -59,7 +59,7 @@ class RequirementRankPlacementPolicy(object):
         return eval(rank, vars, {})
 
     def _rank_executors(self, executors, options):
-        rank = options.get('rank', _DEFAULT_RANK)
+        rank = options.get('rank') or _DEFAULT_RANK
         executors.sort(key=lambda executor: self._eval_rank(rank,
             self._collect_vars(executor)))
         return executors

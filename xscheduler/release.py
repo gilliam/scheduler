@@ -63,14 +63,10 @@ class Release(object):
                 and _is_running(inst)]
 
     def _group(self, insts):
-        kfn = lambda inst: inst.service
-        return itertools.groupby(sorted(insts, key=kfn), kfn)
-
-    def _collect_instances_per_service(self, insts):
-        per_service = defaultdict(list)
+        groups = defaultdict(list)
         for inst in insts:
-            per_service[inst.service].append(inst)
-        return per_service
+            groups[inst.service].append(inst)
+        return groups
 
     def scale(self, scales):
         """Scale this release.
@@ -84,8 +80,6 @@ class Release(object):
         per_service = defaultdict(list)
         for inst in insts:
             per_service[inst.service].append(inst)
-        print "PER SERVICE", per_service
-        print "SCALES"
         for name, scale in scales.items():
             insts = per_service.get(name, [])
             if len(insts) > scale:
@@ -93,7 +87,6 @@ class Release(object):
                 return True
             elif len(insts) < scale:
                 # we need to create an instance
-                print "CREATE ON", name
                 self._create(name)
                 return True
 
@@ -116,18 +109,22 @@ class Release(object):
                 and inst_ports == serv_ports)
 
     def _migrate_to_release(self, inst_map):
-        for name in reversed(self._build_order()):
-            service = self.services[name]
-            for inst in inst_map.get(name, []):
-                if inst.release != self.name:
-                    if self._compare_instance_to_service(inst, service):
-                        inst.rerelease(self.name)
-                    else:
-                        inst.migrate(self.name, service['image'],
-                                     service['command'],
-                                     service.get('env', {}),
-                                     service.get('ports', []))
-                    return True
+        insts = [inst
+                 for name in self._build_order()
+                 for inst in inst_map.get(name, [])]
+        insts = [inst for inst in insts
+                 if inst.release != self.name]
+        cnt = len(insts)
+        for inst in insts:
+            service = self.services[inst.service]
+            if self._compare_instance_to_service(inst, service):
+                inst.rerelease(self.name)
+            else:
+                inst.migrate(self.name, service['image'],
+                             service['command'],
+                             service.get('env', {}),
+                             service.get('ports', []))
+            return cnt > 1
 
     def _build_order(self):
         order = self.services.keys()
@@ -138,7 +135,7 @@ class Release(object):
                 if idx < order.index(name):
                     order.remove(name)
                     order.insert(idx, name)
-        return order
+        return reversed(order)
 
 
 class ReleaseStore(object):

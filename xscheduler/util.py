@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import time
 
 from gevent.event import Event
@@ -100,6 +101,8 @@ class Lock(object):
             try:
                 e = self.etcd.get(self.key)
             except EtcdError, err:
+                logging.error("lock: %s: error: %r" % (
+                        self.key, err))
                 e = self.etcd.set(self.key, self.name)
                 self._gthread = gevent.spawn(self._heartbeat)
                 break

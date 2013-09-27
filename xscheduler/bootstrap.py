@@ -76,7 +76,7 @@ def _bootstrap0(registry_client, executor_manager, store_client,
     """
     with open(os.path.join(os.path.dirname(__file__), '../release.yml')) as fp:
         release = yaml.load(fp)
-        release['name'] = _INITIAL_RELEASE_NAME
+    release['name'] = _INITIAL_RELEASE_NAME
 
     services = release['services']
     insts = {name: _create(store_command, formation, name,
@@ -115,7 +115,7 @@ def main():
     format = '%(asctime)s %(levelname)-8s %(name)s: %(message)s'
     logging.basicConfig(level=logging.DEBUG, format=format)
 
-    formation = os.getenv('GILLIAM_FORMATION')
+    formation = os.getenv('GILLIAM_FORMATION', 'scheduler')
     
     store_client = etcd.Etcd(host='_store.%s.service' % (formation,),
                              autostart=False)

@@ -213,16 +213,18 @@ class ReleaseResource(_BaseResource):
         self._check_not_found(data)
         release = self.factory(formation, name, data['services'])
         more = release.migrate(params.get('from'))
+        print "MIGRATE RESULT", more
         return Response(json=more or False, status=200)
 
 
 class InstanceResource(_BaseResource):
 
-    def __init__(self, log, url, curl, store):
+    def __init__(self, log, url, curl, store, command):
         self.log = log
         self.url = url
         self.curl = curl
         self.store = store
+        self.command = command
 
     # we need a specific build function here since we need to
     # fetch the release.
@@ -235,6 +237,17 @@ class InstanceResource(_BaseResource):
         return _collection(request, self.store.query_formation(formation),
                            partial(self.curl, formation=formation),
                            self._build)
+
+    def create(self, request, formation):
+        data = self._assert_request_content(request, 'service', 
+                                            'release', 'image',
+                                            'command')
+        inst = store.create(self.command, formation, data['service'],
+                            data['release'], data['image'], data['command'],
+                            data.get('env'), data.get('ports'),
+                            data.get('assigned_to'),
+                            data.get('placement'))
+        return Response(status=201, json=self._build(inst))
 
     def show(self, request, formation, service, instance):
         inst = self.store.get(formation, service, instance)
@@ -279,7 +292,7 @@ class API(object):
             "instances", "instance",
             path_prefix="/formation/{formation}/instances",
             controller="instance",
-            collection_actions=['index'],
+            collection_actions=['index', 'create'],
             member_actions=['show', 'delete'],
             member_prefix="/{service}.{instance}",
             formatted=False)
@@ -340,6 +353,6 @@ def main():
             logging.getLogger('api.release'),
             partial(api.url, 'instance'),
             partial(api.url, 'instances'),
-            store_query))
+            store_query, store_command))
 
     pywsgi.WSGIServer(('', options.port), api).serve_forever()
