@@ -323,6 +323,9 @@ def main():
     format = '%(levelname)-8s %(name)s: %(message)s'
     logging.basicConfig(level=logging.DEBUG, format=format)
 
+    requests_log = logging.getLogger("requests")
+    requests_log.setLevel(logging.WARNING)
+
     formation = os.getenv('GILLIAM_FORMATION')
     store_client = etcd.Etcd(host='_store.%s.service' % (formation,))
 

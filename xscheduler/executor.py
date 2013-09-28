@@ -85,6 +85,7 @@ class DispatchError(ExecutorError):
 class _ExecutorController(object):
 
     def __init__(self, clock, name, apiclient, store_query, interval):
+        self.log = logging.getLogger('executor.controller.%s' % (name,))
         self.name = name
         self.apiclient = apiclient
         self.store_query = store_query
@@ -161,11 +162,9 @@ class _ExecutorController(object):
         missing = (set(containers)
                    - set(self._containers)
                    - set(self._terminated))
-        print "reconscile:", missing
+        self.log.info("reconscile: %s" % (', '.join(missing)))
         for cid, state in [(cid, containers[cid]) for cid in missing]:
-            print "STATE IS", state
             if self._geti(state) is not None:
-                print "REMEMBER CONTINE", cid
                 self._remember(cid, state)
             # FIXME: what to do with containers where the instance
             # cannot be found?  at what stage do we remove them?
@@ -173,7 +172,8 @@ class _ExecutorController(object):
 
     def _mark_lost_containers_as_lost(self, containers):
         missing = set(self._containers) - set(containers)
-        print "mark lost: missing containers", missing
+        self.log.info("mark containers %s as lost" % (
+                ', '.join(missing)))
         for state in [self._containers[cid] for cid in missing]:
             inst = self._geti(state)
             if inst is not None and inst.state != inst.STATE_LOST:

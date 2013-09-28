@@ -37,6 +37,9 @@ def main():
     format = '%(asctime)s %(levelname)-8s %(name)s: %(message)s'
     logging.basicConfig(level=logging.DEBUG, format=format)
 
+    requests_log = logging.getLogger("requests")
+    requests_log.setLevel(logging.WARNING)
+
     formation = os.getenv('GILLIAM_FORMATION')
     instance = os.getenv('GILLIAM_INSTANCE')
     srnodes = os.getenv('GILLIAM_SERVICE_REGISTRY_NODES')
