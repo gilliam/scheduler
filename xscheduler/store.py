@@ -137,6 +137,7 @@ class InstanceStoreCommand(_InstanceStoreCommon):
     def create(self, **kwargs):
         instance = self.FACTORY(self, **kwargs)
         self.client.set(self._make_key(instance), json.dumps(instance.to_json()))
+        return instance
 
     def delete(self, instance):
         """Delete the given instance."""
