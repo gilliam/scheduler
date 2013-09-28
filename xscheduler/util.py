@@ -103,7 +103,7 @@ class Lock(object):
             except EtcdError, err:
                 logging.error("lock: %s: error: %r" % (
                         self.key, err))
-                e = self.etcd.set(self.key, self.name)
+                self.etcd.set(self.key, self.name)
                 self._gthread = gevent.spawn(self._heartbeat)
                 break
             else:

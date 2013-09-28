@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-_DEFAULT_RANK = '-ncont'
+import logging
 
 from xscheduler.util import RecurringTask, TokenBucketRateLimiter
+
+
+_DEFAULT_RANK = '-ncont'
 
 
 def _is_running(inst):
@@ -91,6 +93,7 @@ class Scheduler(object):
 
 
 class Updater(object):
+    log = logging.getLogger('scheduler.updater')
 
     def __init__(self, clock, store_query, manager):
         self._runner = RecurringTask(3, self._do_update)
@@ -121,7 +124,19 @@ class Updater(object):
             if not self._equal_instance_container(instance, container):
                 if not self._limiter.check():
                     break
+                self.log.info("restarting %s/%s because of config change" % (
+                        instance.formation, instance.name))
                 instance.restart(self.manager)
+            elif instance.state == instance.STATE_MIGRATING:
+                if not self._limiter.check():
+                    break
+                # XXX: special case for instances that are stuck in
+                # migrating but migration has happened, but it has not
+                # been recoreded. this can happen when we're migrating
+                # outselves.
+                self.log.info("setting merging instance %s/%s to running" % (
+                        instance.formation, instance.name))
+                instance.update(state=instance.STATE_RUNNING)
 
 
 class Terminator(object):

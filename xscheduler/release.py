@@ -15,9 +15,7 @@
 from collections import defaultdict
 import json
 import random
-import itertools
-
-import shortuuid
+import logging
 
 from etcd import EtcdError
 
@@ -33,6 +31,7 @@ class Release(object):
 
     def __init__(self, store_command, store_query,
                  formation, name, services):
+        self.log = logging.getLogger('release.%s:%s' % (formation, name))
         self.store_command = store_command
         self.store_query = store_query
         self.formation = formation
@@ -42,19 +41,13 @@ class Release(object):
     def _create(self, service):
         """Create an instance of service."""
         template = self.services[service]
-        instance = shortuuid.uuid()
-        # FIXME: move this to a factory function
-        self.store_command.create(
-            formation=self.formation,
-            service=service,
-            instance=instance,
-            name='%s.%s' % (service, instance),
-            release=self.name,
-            state=store.Instance.STATE_PENDING,
-            image=template['image'],
-            command=template.get('command'),
-            env=template.get('env', {}),
-            ports=template.get('ports', []))
+        return store.create(self.store_command,
+                            self.formation, service,
+                            self.name,
+                            template['image'],
+                            template.get('command'),
+                            env=template.get('env', {}),
+                            ports=template.get('ports', []))
 
     def _collect(self, release=None):
         return [inst for inst in self.store_query.index()
@@ -115,11 +108,14 @@ class Release(object):
         insts = [inst for inst in insts
                  if inst.release != self.name]
         cnt = len(insts)
+        self.log.info("instances to migrate: %d" % (cnt,))
         for inst in insts:
             service = self.services[inst.service]
             if self._compare_instance_to_service(inst, service):
+                self.log.info("re-release %s" % (inst.name,))
                 inst.rerelease(self.name)
             else:
+                self.log.info("migrate %s" % (inst.name,))
                 inst.migrate(self.name, service['image'],
                              service['command'],
                              service.get('env', {}),

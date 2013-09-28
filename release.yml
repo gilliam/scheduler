@@ -1,7 +1,7 @@
 author: jrydberg
 kind: gilliam#release
 message: null
-name: '6'
+name: '3'
 services:
   _store:
     command: null
@@ -14,13 +14,13 @@ services:
   _worker:
     command: bin/worker
     env: {}
-    image: gilliam/scheduler-_worker:8e5da57a9920b2b9c8ee9888808bb0da
+    image: gilliam/scheduler-_worker:a0a786d6bd8e6ebdc8a1139d0d8f1673
     options: {}
     ports: []
   api:
     command: bin/api
     env: {}
-    image: gilliam/scheduler-api:8e5da57a9920b2b9c8ee9888808bb0da
+    image: gilliam/scheduler-api:a0a786d6bd8e6ebdc8a1139d0d8f1673
     options: {}
     ports:
     - 80
