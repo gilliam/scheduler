@@ -136,7 +136,7 @@ class FormationResource(_BaseResource):
         return data
 
     def index(self, request):
-        items = self.app_store.apps()
+        items = self.store.index()
         return _collection(request, items, self.curl, self._build)
 
     def show(self, request, formation):
@@ -146,7 +146,7 @@ class FormationResource(_BaseResource):
 
     def create(self, request):
         params = self._assert_request_content(request, 'name')
-        self.app_store.create(params['name'], params)
+        self.store.create(params['name'], params)
         response = Response(json=self._build(params), status=201)
         response.headers.add('Location', 
                              self.url(formation=params['name']))
@@ -155,7 +155,7 @@ class FormationResource(_BaseResource):
     def delete(self, request, formation):
         data = self.store.get(formation)
         self._check_not_found(data)
-        self.app_store.remove(formation)
+        self.store.remove(formation)
         return Response(status=204)
         
 
