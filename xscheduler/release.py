@@ -168,6 +168,10 @@ class ReleaseStore(object):
 
     def index(self, formation):
         indexkey = '%s/%s' % (self.PREFIX, formation)
-        for key, value in self.etcd.get_recursive(indexkey).items():
-            formation, name = self._split_key(key)
-            yield name, json.loads(value)
+        try:
+            for key, value in self.etcd.get_recursive(indexkey).items():
+                formation, name = self._split_key(key)
+                yield name, json.loads(value)
+        except ValueError:
+            pass
+
