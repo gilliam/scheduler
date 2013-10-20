@@ -6,3 +6,5 @@ _worker:
   script: bin/worker
 _store:
   type: etcd
+_bootstrap:
+  script: bin/bootstrap

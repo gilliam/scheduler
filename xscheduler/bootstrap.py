@@ -30,6 +30,9 @@ from xscheduler.release import ReleaseStore
 from xscheduler import store, util
 
 
+_DEPLOY_TIMEOUT = 10 * 60
+_INITIAL_RELEASE_NAME = '1'
+
 
 def _create_formation(store_command, insts):
     for inst in insts:
@@ -49,15 +52,13 @@ def _create(store_command, formation, service, release, template):
 
 def _deploy_instance(executor_manager, inst, name):
     executor_manager.dispatch(inst, name)
-    executor_manager.wait(inst, name, timeout=120)
+    state = executor_manager.wait(inst, name, timeout=_DEPLOY_TIMEOUT)
+    assert state == 'running'
 
 
 def _select_executor(registry_client):
     name, data = next(registry_client.query_formation('executor'))
     return data['instance']
-
-
-_INITIAL_RELEASE_NAME = '1'
 
 
 def _bootstrap0(registry_client, executor_manager, store_client,
@@ -74,18 +75,26 @@ def _bootstrap0(registry_client, executor_manager, store_client,
     5. deploy the rest of the instances.
     6. hope for the best.
     """
-    with open(os.path.join(os.path.dirname(__file__), '../release.yml')) as fp:
-        release = yaml.load(fp)
+    data = os.getenv('RELEASE')
+    if data:
+        release = yaml.load(data)
+    else:
+        with open(os.path.join(os.path.dirname(__file__), '../release.yml')) as fp:
+            release = yaml.load(fp)
     release['name'] = _INITIAL_RELEASE_NAME
+
+    print "BOOSTRAP", release
 
     services = release['services']
     insts = {name: _create(store_command, formation, name,
                            _INITIAL_RELEASE_NAME, services[name])
-             for name in services}
+             for name in services if name != '_bootstrap'}
     executor = _select_executor(registry_client)
     _deploy_instance(executor_manager, insts['_store'], executor)
     # the instance is now up and running, so now we can do a proper
     # "assign".
+    logging.info("waiting for _store to start ...")
+    time.sleep(4)
     store_client.start()
 
     insts['_store'].update(state=store.Instance.STATE_RUNNING,
@@ -108,7 +117,7 @@ def _bootstrap0(registry_client, executor_manager, store_client,
 def main():
     parser = OptionParser()
     parser.add_option("-s", "--service-registry", dest="service_registry",
-                      default=os.getenv('GILLIAM_SERVICE_REGISTRY_NODES', ''),
+                      default=os.getenv('GILLIAM_SERVICE_REGISTRY', ''),
                       help="service registry nodes", metavar="HOSTS")
     (options, args) = parser.parse_args()
 
