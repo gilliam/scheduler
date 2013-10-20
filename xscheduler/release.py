@@ -1,4 +1,4 @@
-# Copyright 2013 Johan Rydberg.
+B0;95;c# Copyright 2013 Johan Rydberg.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -174,4 +174,5 @@ class ReleaseStore(object):
                 yield name, json.loads(value)
         except ValueError:
             pass
-
+        except EtcdError:
+            pass
