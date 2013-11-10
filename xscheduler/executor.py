@@ -84,11 +84,13 @@ class DispatchError(ExecutorError):
 
 class _ExecutorController(object):
 
-    def __init__(self, clock, name, apiclient, store_query, interval):
+    def __init__(self, clock, name, apiclient, store_query, state_cache,
+                 interval):
         self.log = logging.getLogger('executor.controller.%s' % (name,))
         self.name = name
         self.apiclient = apiclient
         self.store_query = store_query
+        self.state_cache = state_cache
         self.interval = interval
         self._problematic = True
         self._terminated = []
@@ -210,6 +212,11 @@ class _ExecutorController(object):
 
     def _remember(self, cid, container):
         self._containers[cid] = container
+        status = {'state': container.state, 'reason': container.reason}
+        self.state_cache.save(container.formation,
+                              container.service,
+                              container.instance,
+                              status)
 
     def _forget(self, cid):
         del self._containers[cid]
@@ -217,13 +224,14 @@ class _ExecutorController(object):
 
 class ExecutorManager(object):
 
-    def __init__(self, clock, registry, store_query, interval,
-                 formation='executor'):
+    def __init__(self, clock, registry, store_query, state_cache,
+                 interval, formation='executor'):
         self.clock = clock
         self.registry = registry
         self.store_query = store_query
         self.check_interval = interval
         self.formation = formation
+        self.state_cache = state_cache
         self._form_cache = None
         self._client = {}
 
@@ -244,7 +252,7 @@ class ExecutorManager(object):
         """Create ..."""
         apiclient = _APIClient(requests.Session(), name, self.formation)
         self._client[name] = _ExecutorController(
-            self.clock, name, apiclient, self.store_query,
+            self.clock, name, apiclient, self.store_query, self.state_cache,
             self.check_interval).start()
 
     def dispatch(self, inst, name):

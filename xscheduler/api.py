@@ -19,16 +19,19 @@ import logging
 import json
 from optparse import OptionParser
 import os
+import time
 
 import etcd
 from functools import partial
 from gevent import pywsgi
+from gilliam.service_registry import (ServiceRegistryClient, Resolver)
 from routes import Mapper, URLGenerator
 from webob.dec import wsgify
 from webob.exc import HTTPNotFound, HTTPBadRequest
 from webob import Response
 from etcd import EtcdError
 
+from .cache import make_client as make_cache_client
 from xscheduler import store
 from xscheduler.release import ReleaseStore, Release
 
@@ -219,18 +222,27 @@ class ReleaseResource(_BaseResource):
 
 class InstanceResource(_BaseResource):
 
-    def __init__(self, log, url, curl, store, command):
+    def __init__(self, log, url, curl, store, command,
+                 state_cache):
         self.log = log
         self.url = url
         self.curl = curl
         self.store = store
         self.command = command
+        self.state_cache = state_cache
 
     # we need a specific build function here since we need to
     # fetch the release.
     def _build(self, data):
+        status = self.state_cache.get(data.formation,
+                                      data.service,
+                                      data.instance)
         data = data.to_json()
-        data.update({'kind': 'gilliam#instance'})
+        data.update({
+                'kind': 'gilliam#instance',
+                'status': status.get('state', 'unknown'),
+                'reason': status.get('reason', 'unknown'),
+                })
         return data
 
     def index(self, request, formation):
@@ -335,6 +347,11 @@ def main():
     store_command = store.InstanceStoreCommand(store_client)
     store_query = store.InstanceStoreQuery(store_client, store_command)
     store_query.start()
+
+    registry_client = ServiceRegistryClient(time)
+    registry_resolver = Resolver(registry_client)
+    state_cache = make_cache_client(registry_resolver,
+                                    '_cache.{0}.service'.format(formation))
     
     api = API(logging.getLogger('api'), {})
 
@@ -356,6 +373,7 @@ def main():
             logging.getLogger('api.release'),
             partial(api.url, 'instance'),
             partial(api.url, 'instances'),
-            store_query, store_command))
+            store_query, store_command,
+            state_cache))
 
     pywsgi.WSGIServer(('', options.port), api).serve_forever()

@@ -1,10 +1,14 @@
-api:
-  script: bin/api
-  ports:
-    - 80
-_worker:
-  script: bin/worker
-_store:
-  type: etcd
-_bootstrap:
-  script: bin/bootstrap
+processes:
+  api:
+    script: bin/api
+    ports:
+      - 80
+  _worker:
+    script: bin/worker
+  _bootstrap:
+    script: bin/bootstrap
+auxiliary:
+  _store:
+    type: etcd
+  _cache:
+    type: redis

@@ -9,3 +9,4 @@ git+https://github.com/transitorykris/etcd-py.git
 git+https://github.com/gilliam/gilliam-py.git
 Routes
 WebOb
+redis

@@ -20,12 +20,14 @@ import time
 import logging
 
 import etcd
-from gilliam.service_registry import ServiceRegistryClient
+from gilliam.service_registry import (ServiceRegistryClient, Resolver)
 
 from xscheduler.scheduler import (RequirementRankPlacementPolicy,
                                   Scheduler, Updater, Terminator)
 from xscheduler.executor import ExecutorManager
 from xscheduler import store, util
+
+from .cache import make_client as make_cache_client
 
 
 def _worker(executor_manager, store_query):
@@ -42,16 +44,19 @@ def main():
 
     formation = os.getenv('GILLIAM_FORMATION')
     instance = os.getenv('GILLIAM_INSTANCE')
-    srnodes = os.getenv('GILLIAM_SERVICE_REGISTRY_NODES')
     check_interval = int(os.getenv('CHECK_INTERVAL', 10))
     
     store_client = etcd.Etcd(host='_store.%s.service' % (formation,))
     store_command = store.InstanceStoreCommand(store_client)
     store_query = store.InstanceStoreQuery(store_client, store_command)
 
-    registry_client = ServiceRegistryClient(time, srnodes.split(','))
+    registry_client = ServiceRegistryClient(time)
+    registry_resolver = Resolver(registry_client)
+    state_cache = make_cache_client(registry_resolver,
+                                    '_cache.{0}.service'.format(formation))
+
     executor_manager = ExecutorManager(time, registry_client, store_query,
-                                       check_interval)
+                                       state_cache, check_interval)
 
     policy = RequirementRankPlacementPolicy()
     services = [
