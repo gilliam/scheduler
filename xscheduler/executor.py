@@ -145,15 +145,7 @@ class _ExecutorController(object):
                 self._problematic = False
             for id, container in containers.items():
                 self._remember(id, container)
-            self._update_state()
         self._started.set()
-
-    def _update_state(self):
-        for id, container in self._containers.items():
-            if container.state == 'error':
-                inst = self._geti(container)
-                if inst is not None and inst.state != inst.STATE_LOST:
-                    inst.set_state(inst.STATE_LOST)
 
     def _reconcile(self, containers):
         self._reconcile_missing_containers(containers)
