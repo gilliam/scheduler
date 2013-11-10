@@ -14,7 +14,8 @@
 
 import logging
 
-from xscheduler.util import RecurringTask, TokenBucketRateLimiter
+from .executor import DispatchError
+from .util import RecurringTask, TokenBucketRateLimiter
 
 
 _DEFAULT_RANK = '-ncont'
@@ -83,13 +84,16 @@ class Scheduler(object):
         for instance in self.store_query.unassigned():
             if not self._limiter.check():
                 break
-            if instance.assigned_to:
-                instance.dispatch(self.manager, instance.assigned_to)
-            else:
-                executor = self.policy.select(self.manager.clients(),
-                                              instance.placement or {})
-                if executor is not None:
-                    instance.dispatch(self.manager, executor.name)
+            try:
+                if instance.assigned_to:
+                    instance.dispatch(self.manager, instance.assigned_to)
+                else:
+                    executor = self.policy.select(self.manager.clients(),
+                                                  instance.placement or {})
+                    if executor is not None:
+                        instance.dispatch(self.manager, executor.name)
+            except DispatchError:
+                print "error"
 
 
 class Updater(object):
@@ -126,7 +130,10 @@ class Updater(object):
                     break
                 self.log.info("restarting %s/%s because of config change" % (
                         instance.formation, instance.name))
-                instance.restart(self.manager)
+                try:
+                    instance.restart(self.manager)
+                except DispatchError:
+                    print "ERROR"
             elif instance.state == instance.STATE_MIGRATING:
                 if not self._limiter.check():
                     break
@@ -136,7 +143,10 @@ class Updater(object):
                 # outselves.
                 self.log.info("setting merging instance %s/%s to running" % (
                         instance.formation, instance.name))
-                instance.update(state=instance.STATE_RUNNING)
+                try:
+                    instance.update(state=instance.STATE_RUNNING)
+                except DispatchError:
+                    print "ERROR"
 
 
 class Terminator(object):
@@ -156,4 +166,7 @@ class Terminator(object):
         for instance in self.store_query.shutting_down():
             if not self._limiter.check():
                 break
-            instance.terminate(self.manager)
+            try:
+                instance.terminate(self.manager)
+            except DispatchError:
+                print "ERROR"
