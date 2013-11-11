@@ -21,13 +21,14 @@ import time
 import logging
 
 import etcd
-from gilliam.service_registry import ServiceRegistryClient
+from gilliam.service_registry import ServiceRegistryClient, Resolver
 import shortuuid
 import yaml
 
-from xscheduler.executor import ExecutorManager
-from xscheduler.release import ReleaseStore
-from xscheduler import store, util
+from .cache import make_client as make_cache_client
+from .executor import ExecutorManager
+from .release import ReleaseStore
+from . import store, util
 
 
 _DEPLOY_TIMEOUT = 10 * 60
@@ -134,7 +135,12 @@ def main():
     release_store = ReleaseStore(store_client)
 
     registry_client = ServiceRegistryClient(time, options.service_registry.split(','))
-    executor_manager = ExecutorManager(time, registry_client, store_query, 5)
+    registry_resolver = Resolver(registry_client)
+    state_cache = make_cache_client(registry_resolver,
+                                    '_cache.{0}.service'.format(formation))
+
+    executor_manager = ExecutorManager(time, registry_client, store_query,
+                                       state_cache, 5)
     executor_manager.start()
     _bootstrap0(registry_client, executor_manager, store_client, store_command,
                 release_store, formation)
