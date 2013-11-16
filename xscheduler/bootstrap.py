@@ -52,8 +52,12 @@ def _create(store_command, formation, service, release, template):
 
 
 def _deploy_instance(executor_manager, inst, name):
+    logging.info("dispatching instance {0} to {1}".format(inst.name, name))
     executor_manager.dispatch(inst, name)
     state = executor_manager.wait(inst, name, timeout=_DEPLOY_TIMEOUT)
+    if state != 'running':
+        logging.error("failed to start instance {0}: state {1}".format(
+            inst.name, state))
     assert state == 'running'
 
 
@@ -80,11 +84,10 @@ def _bootstrap0(registry_client, executor_manager, store_client,
     if data:
         release = yaml.load(data)
     else:
-        with open(os.path.join(os.path.dirname(__file__), '../release.yml')) as fp:
+        with open(os.path.join(os.path.dirname(__file__),
+                               '../release.yml')) as fp:
             release = yaml.load(fp)
     release['name'] = _INITIAL_RELEASE_NAME
-
-    print "BOOSTRAP", release
 
     services = release['services']
     insts = {name: _create(store_command, formation, name,
@@ -113,20 +116,24 @@ def _bootstrap0(registry_client, executor_manager, store_client,
                 _deploy_instance(executor_manager, inst, executor)
                 inst.update(state=store.Instance.STATE_RUNNING,
                             assigned_to=executor)
+    logging.info("done! scheduler should be up and running!")
 
 
 def main():
     parser = OptionParser()
+    parser.add_option("-D", "--debug", dest="debug", action="store_true")
     parser.add_option("-s", "--service-registry", dest="service_registry",
                       default=os.getenv('GILLIAM_SERVICE_REGISTRY', ''),
                       help="service registry nodes", metavar="HOSTS")
     (options, args) = parser.parse_args()
 
     format = '%(asctime)s %(levelname)-8s %(name)s: %(message)s'
-    logging.basicConfig(level=logging.DEBUG, format=format)
+    logging.basicConfig(
+        level=logging.DEBUG if options.debug else logging.INFO,
+        format=format)
 
     formation = os.getenv('GILLIAM_FORMATION', 'scheduler')
-    
+
     store_client = etcd.Etcd(host='_store.%s.service' % (formation,),
                              autostart=False)
     store_command = store.InstanceStoreCommand(store_client)
@@ -144,4 +151,3 @@ def main():
     executor_manager.start()
     _bootstrap0(registry_client, executor_manager, store_client, store_command,
                 release_store, formation)
-
