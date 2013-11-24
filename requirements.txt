@@ -5,8 +5,9 @@ pyee
 python-circuit
 glock
 PyYAML
-git+https://github.com/transitorykris/etcd-py.git
+git+https://github.com/gilliam/etcd-py.git
 git+https://github.com/gilliam/gilliam-py.git
+git+https://github.com/jrydberg/mockery.git
 Routes
 WebOb
 redis
